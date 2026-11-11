@@ -1,6 +1,6 @@
 # 验证记录
 
-日期：2026-11-11。范围：Vox 长录音分支，目标 Android 8.1 / 2 GB 搜狗 S1 AI Recorder。
+日期：2026-11-11。范围：柒声（基于 Vox 的长录音衍生项目），目标 Android 8.1 / 2 GB 搜狗 S1 AI Recorder。
 
 ## 自动验证
 
@@ -8,8 +8,8 @@
 - `testDebugUnitTest assembleDebug lintDebug`：成功；5 项单元测试通过，0 失败。
 - Android lint：0 errors、17 warnings，主要为上游依赖版本、图标目录和风格建议；保留 Android 8.1 兼容实现。系统备份在目标 Android 8.1 上关闭，Android 12+ 的设备迁移策略未另行定制。
 - 16 分 1 秒等量 PCM 数据模拟：生成 8 个完整两分钟 WAV 和 1 个一秒尾段，数据长度完全一致。此项不是按真实时间运行的锁屏录音测试。
-- APK：`app/build/outputs/apk/debug/app-debug.apk`，约 17 MB，`it.eja.vox.longrecord` / `0.6.0-longrecord` / minSdk 24。
-- APK SHA-256：`3ce7feac4bddfd0cf953843bb15534da7ddb07af755fa05ce3c3119549263834`。
+- APK：`app/build/outputs/apk/debug/app-debug.apk`，约 17 MB，`io.github.sep1107.qisheng` / `0.6.1` / minSdk 24。
+- 柒声 0.6.1 APK SHA-256：`3eeb3bfffb450c286c9be4cb897a94e98e2aa31c09af96afb1aea31f2787fe33`。
 
 ## API 验证（合成内容）
 

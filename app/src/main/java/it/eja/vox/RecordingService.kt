@@ -184,7 +184,7 @@ class RecordingService : Service() {
         val open = PendingIntent.getActivity(this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
         val stop = PendingIntent.getService(this, 1, Intent(this, RecordingService::class.java).setAction(STOP), PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, "recording").setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Vox 长录音").setContentText(message).setContentIntent(open)
+            .setContentTitle("柒声").setContentText(message).setContentIntent(open)
             .setOngoing(true).addAction(android.R.drawable.ic_media_pause, "停止录音", stop).build()
     }
 

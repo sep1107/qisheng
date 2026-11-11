@@ -19,5 +19,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "VOX"
+rootProject.name = "QiSheng"
 include(":app")

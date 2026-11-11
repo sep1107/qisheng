@@ -12,7 +12,7 @@
 
     <application
         android:allowBackup="false"
-        android:label="Vox 长录音"
+        android:label="柒声"
         android:icon="@drawable/logo"
         android:banner="@drawable/banner"
         android:supportsRtl="true"
