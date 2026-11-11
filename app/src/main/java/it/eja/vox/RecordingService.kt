@@ -11,13 +11,8 @@ import android.os.*
 import androidx.compose.runtime.mutableStateOf
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.asRequestBody
-import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 
 data class RecordingStatus(
@@ -44,12 +39,12 @@ class RecordingService : Service() {
     private var worker: Thread? = null
     private var session: File? = null
     private val uploads = Executors.newSingleThreadExecutor()
-    private val client = OkHttpClient.Builder().connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(5, TimeUnit.MINUTES).callTimeout(6, TimeUnit.MINUTES).build()
     private var wakeLock: PowerManager.WakeLock? = null
-    private var url = ""
-    private var token = ""
-    private var model = ""
+    private val cloud by lazy {
+        CloudApi(getSharedPreferences("vox_prefs", MODE_PRIVATE)) { message ->
+            RecordingState.update { it.copy(message = message) }
+        }
+    }
     private var uploadFailed = false
 
     override fun onBind(intent: Intent?) = null
@@ -69,10 +64,6 @@ class RecordingService : Service() {
             return START_NOT_STICKY
         }
         if (worker != null) return START_NOT_STICKY
-        val prefs = getSharedPreferences("vox_prefs", MODE_PRIVATE)
-        url = prefs.getString("url", "") ?: ""
-        token = prefs.getString("token", "") ?: ""
-        model = prefs.getString("v_model", "") ?: ""
         val root = File(filesDir, "recordings").apply { mkdirs() }
         val retry = intent?.action == RETRY
         val name = intent?.getStringExtra("session")
@@ -160,17 +151,7 @@ class RecordingService : Service() {
             val textFile = File(audio.parentFile, audio.nameWithoutExtension + ".txt")
             if (textFile.exists() || uploadFailed) return@execute
             try {
-                require(url.startsWith("https://") && model.isNotBlank()) { "请配置 HTTPS ASR 和模型" }
-                val body = MultipartBody.Builder().setType(MultipartBody.FORM)
-                    .addFormDataPart("file", audio.name, audio.asRequestBody("audio/wav".toMediaType()))
-                    .addFormDataPart("model", model).build()
-                val request = Request.Builder().url(url).header("Authorization", "Bearer $token").post(body).build()
-                client.newCall(request).execute().use { response ->
-                    check(response.isSuccessful) { "HTTP ${response.code}" }
-                    val json = JSONObject(response.body?.string() ?: "")
-                    check(json.has("text")) { "响应缺少 text" }
-                    RecordingStore.atomicText(textFile, json.getString("text"))
-                }
+                RecordingStore.atomicText(textFile, cloud.transcribe(audio))
                 RecordingState.update { it.copy(text = RecordingStore.transcript(audio.parentFile!!)) }
             } catch (e: Exception) {
                 uploadFailed = true
@@ -190,7 +171,7 @@ class RecordingService : Service() {
 
     override fun onDestroy() {
         recording = false
-        client.dispatcher.cancelAll()
+        cloud.cancel()
         if (wakeLock?.isHeld == true) wakeLock?.release()
         uploads.shutdown()
         super.onDestroy()

@@ -31,28 +31,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.core.content.ContextCompat
-import okhttp3.*
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.asRequestBody
-import okhttp3.RequestBody.Companion.toRequestBody
-import org.json.JSONArray
-import org.json.JSONObject
 import java.io.*
-import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import org.commonmark.parser.Parser
 import org.commonmark.renderer.html.HtmlRenderer
 
 class MainActivity : ComponentActivity() {
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(5, TimeUnit.MINUTES)
-        .readTimeout(5, TimeUnit.MINUTES)
-        .writeTimeout(5, TimeUnit.MINUTES)
-        .build()
+    private val cloud by lazy {
+        CloudApi(getSharedPreferences("vox_prefs", MODE_PRIVATE)) { message ->
+            RecordingState.update { it.copy(message = message) }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,14 +71,11 @@ class MainActivity : ComponentActivity() {
         val context = LocalContext.current
         val prefs = remember { context.getSharedPreferences("vox_prefs", Context.MODE_PRIVATE) }
 
-        var url by remember { mutableStateOf(prefs.getString("url", "https://api.openai.com/v1/audio/transcriptions") ?: "") }
-        var token by remember { mutableStateOf(prefs.getString("token", "") ?: "") }
-        var voiceModel by remember { mutableStateOf(prefs.getString("v_model", "") ?: "") }
-
-        var llmUrl by remember { mutableStateOf(prefs.getString("llm_url", "") ?: "") }
-        var llmAuth by remember { mutableStateOf(prefs.getString("llm_auth", "") ?: "") }
-        var llmModel by remember { mutableStateOf(prefs.getString("llm_model", "") ?: "") }
-        var language by remember { mutableStateOf(prefs.getString("language", "") ?: "") }
+        var apiRevision by remember { mutableStateOf(0) }
+        var language by remember { mutableStateOf(prefs.getString("language", "中文") ?: "中文") }
+        val llmConfigured = remember(apiRevision) {
+            ApiProfiles.load(prefs, "llm").any { it.enabled && it.url.isNotBlank() }
+        }
 
         val recording by RecordingState.status
         val recordingState = recording.recording
@@ -119,6 +108,10 @@ class MainActivity : ComponentActivity() {
 
         LaunchedEffect(sharedUri) {
             sharedUri?.let { uri ->
+                if (recording.processing) {
+                    htmlResponse = wrapHtml("请先结束当前录音/转写，再导入音频。", true)
+                    return@LaunchedEffect
+                }
                 isUploading = true
                 thread {
                     try {
@@ -126,7 +119,7 @@ class MainActivity : ComponentActivity() {
                         context.contentResolver.openInputStream(uri)?.use { input ->
                             FileOutputStream(tempFile).use { output -> input.copyTo(output) }
                         }
-                        processUpload(tempFile, url, token, voiceModel) { raw, html ->
+                        processUpload(tempFile) { raw, html ->
                             runOnUiThread {
                                 transcriptText = raw
                                 htmlResponse = html
@@ -176,7 +169,7 @@ class MainActivity : ComponentActivity() {
             topBar = {
                 CenterAlignedTopAppBar(
                     navigationIcon = {
-                        if (transcriptText.isNotEmpty() && llmUrl.isNotEmpty()) {
+                        if (transcriptText.isNotEmpty() && llmConfigured) {
                             IconButton(onClick = { showActionMenu = true }, enabled = !recording.processing && !isUploading && !hasPending) {
                                 Icon(Icons.Default.AutoAwesome, null)
                             }
@@ -246,7 +239,7 @@ class MainActivity : ComponentActivity() {
                                 showActionMenu = false
                                 isUploading = true
                                 val folder = selectedSession.takeIf { it.isNotEmpty() }?.let { File(context.filesDir, "recordings/$it") }
-                                summarize(llmUrl, llmAuth, llmModel, transcriptText, language) { result, success ->
+                                summarize(transcriptText, language) { result, success ->
                                     if (success && folder != null) RecordingStore.atomicText(File(folder, "summary.txt"), result)
                                     runOnUiThread { htmlResponse = wrapHtml(result, !success); isUploading = false }
                                 }
@@ -267,7 +260,7 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.clickable {
                                 showActionMenu = false
                                 isUploading = true
-                                callLLM(llmUrl, llmAuth, llmModel, "Fix grammar and spelling of the following text. Produce only one final corrected version.\n\n$transcriptText") {
+                                callLLM("Fix grammar and spelling of the following text. Produce only one final corrected version.\n\n$transcriptText") {
                                     runOnUiThread { htmlResponse = it; isUploading = false }
                                 }
                             }
@@ -286,7 +279,7 @@ class MainActivity : ComponentActivity() {
                         if (otherPrompt.isNotEmpty()) {
                             showActionMenu = false
                             isUploading = true
-                            callLLM(llmUrl, llmAuth, llmModel, "$otherPrompt\n\n$transcriptText") {
+                            callLLM("$otherPrompt\n\n$transcriptText") {
                                 runOnUiThread { htmlResponse = it; isUploading = false }
                             }
                         }
@@ -307,7 +300,7 @@ class MainActivity : ComponentActivity() {
                     TextButton(onClick = {
                         showTranslationDialog = false
                         isUploading = true
-                        callLLM(llmUrl, llmAuth, llmModel, "Translate the following text into $targetLang\n\n$transcriptText") {
+                        callLLM("Translate the following text into $targetLang\n\n$transcriptText") {
                             runOnUiThread { htmlResponse = it; isUploading = false }
                         }
                     }) { Text("Translate") }
@@ -317,100 +310,36 @@ class MainActivity : ComponentActivity() {
         }
 
         if (showSettings) {
-            AlertDialog(
-                onDismissRequest = { showSettings = false },
-                title = { Text("Configuration") },
-                text = {
-                    Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                        Text("ASR", style = MaterialTheme.typography.titleSmall)
-                        TextField(value = url, onValueChange = { url = it }, label = { Text("API URL") })
-                        Spacer(modifier = Modifier.height(4.dp))
-                        TextField(value = token, onValueChange = { token = it }, label = { Text("Auth Token") }, visualTransformation = PasswordVisualTransformation())
-                        Spacer(modifier = Modifier.height(4.dp))
-                        TextField(value = voiceModel, onValueChange = { voiceModel = it }, label = { Text("Model") })
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("LLM", style = MaterialTheme.typography.titleSmall)
-                        TextField(value = llmUrl, onValueChange = { llmUrl = it }, label = { Text("API URL") })
-                        Spacer(modifier = Modifier.height(4.dp))
-                        TextField(value = llmAuth, onValueChange = { llmAuth = it }, label = { Text("Auth Token") }, visualTransformation = PasswordVisualTransformation())
-                        Spacer(modifier = Modifier.height(4.dp))
-                        TextField(value = llmModel, onValueChange = { llmModel = it }, label = { Text("Model") })
-                        Spacer(modifier = Modifier.height(4.dp))
-                        TextField(value = language, onValueChange = { language = it }, label = { Text("Language") })
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        prefs.edit()
-                            .putString("url", url).putString("token", token).putString("v_model", voiceModel)
-                            .putString("llm_url", llmUrl).putString("llm_auth", llmAuth)
-                            .putString("llm_model", llmModel).putString("language", language)
-                            .apply()
-                        showSettings = false
-                    }) { Text("Save") }
-                }
-            )
+            ApiSettingsDialog(prefs, dismiss = { showSettings = false }, saved = {
+                apiRevision++
+                language = prefs.getString("language", "中文") ?: "中文"
+                showSettings = false
+            })
         }
     }
 
-    private fun processUpload(file: File, url: String, token: String, model: String, onResult: (String, String) -> Unit) {
+    private fun processUpload(file: File, onResult: (String, String) -> Unit) {
         try {
-            val fileName = if (file.name.endsWith(".wav")) "audio.wav" else "audio.mp3"
-            val mediaType = (if (fileName.endsWith(".wav")) "audio/wav" else "audio/mpeg").toMediaType()
-            val requestBody = MultipartBody.Builder().setType(MultipartBody.FORM)
-                .addFormDataPart("file", fileName, file.asRequestBody(mediaType))
-                .addFormDataPart("model", model.ifEmpty { "whisper-1" }).build()
-            val request = Request.Builder().url(url).header("Authorization", "Bearer $token").post(requestBody).build()
-            client.newCall(request).execute().use { response ->
-                val res = response.body?.string() ?: ""
-                if (response.isSuccessful) {
-                    val text = JSONObject(res).optString("text", "")
-                    onResult(text, wrapHtml(text, false))
-                } else {
-                    val err = try { JSONObject(res).getJSONObject("error").getString("message") } catch (e: Exception) { "Code ${response.code}" }
-                    onResult("", wrapHtml(err, true))
-                }
-            }
-        } catch (e: Exception) { onResult("", wrapHtml("Network Error: ${e.message}", true)) }
-    }
-
-    private fun callLLM(url: String, auth: String, model: String, prompt: String, onResult: (String) -> Unit) {
-        thread {
-            try {
-                val json = JSONObject().apply {
-                    put("model", model)
-                    put("messages", JSONArray().put(JSONObject().apply { put("role", "user"); put("content", prompt) }))
-                }
-                val body = json.toString().toRequestBody("application/json".toMediaType())
-                val request = Request.Builder().url(url).header("Authorization", "Bearer $auth").post(body).build()
-                client.newCall(request).execute().use { response ->
-                    val res = response.body?.string() ?: ""
-                    if (response.isSuccessful) {
-                        val out = JSONObject(res).getJSONArray("choices").getJSONObject(0).getJSONObject("message").getString("content")
-                        onResult(wrapHtml(out, false))
-                    } else onResult(wrapHtml("LLM Error: ${response.code}", true))
-                }
-            } catch (e: Exception) { onResult(wrapHtml("LLM Network Error: ${e.message}", true)) }
+            val text = cloud.transcribe(file)
+            onResult(text, wrapHtml(text, false))
+        } catch (e: Exception) {
+            val message = if (e is ApiUnavailable) e.message ?: "接口不可用" else "转写失败，原文件仍保留"
+            onResult("", wrapHtml(message, true))
         }
     }
 
-    private fun summarize(url: String, auth: String, model: String, text: String, language: String,
-                          result: (String, Boolean) -> Unit) {
+    private fun callLLM(prompt: String, onResult: (String) -> Unit) {
+        thread {
+            try { onResult(wrapHtml(cloud.chat(prompt), false)) }
+            catch (e: Exception) { onResult(wrapHtml(if (e is ApiUnavailable) e.message ?: "接口不可用" else "总结失败，请重试", true)) }
+        }
+    }
+
+    private fun summarize(text: String, language: String, result: (String, Boolean) -> Unit) {
         thread {
             try {
                 val instruction = "总结录音：保留重要事实、数字、决定和待办，不编造。输出语言：${language.ifBlank { "中文" }}。"
-                fun request(part: String): String {
-                    val json = JSONObject().put("model", model).put("messages", JSONArray().put(
-                        JSONObject().put("role", "user").put("content", "$instruction\n\n$part")))
-                    val req = Request.Builder().url(url).header("Authorization", "Bearer $auth")
-                        .post(json.toString().toRequestBody("application/json".toMediaType())).build()
-                    return client.newCall(req).execute().use { response ->
-                        check(response.isSuccessful) { "HTTP ${response.code}" }
-                        JSONObject(response.body?.string() ?: "").getJSONArray("choices")
-                            .getJSONObject(0).getJSONObject("message").getString("content")
-                    }
-                }
+                fun request(part: String) = cloud.chat("$instruction\n\n$part")
                 var parts = RecordingStore.promptChunks(text)
                 var rounds = 0
                 while (parts.size > 1) {
@@ -418,7 +347,9 @@ class MainActivity : ComponentActivity() {
                     parts = RecordingStore.promptChunks(parts.map { request(it) }.joinToString("\n\n"))
                 }
                 result(request(parts.singleOrNull() ?: ""), true)
-            } catch (e: Exception) { result("总结失败（${e.javaClass.simpleName}），原录音和转写仍保留，请重试。", false) }
+            } catch (e: Exception) {
+                result(if (e is ApiUnavailable) e.message ?: "接口不可用" else "总结失败，原录音和转写仍保留，请重试。", false)
+            }
         }
     }
 
