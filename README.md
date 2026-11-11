@@ -1,7 +1,46 @@
+# Vox 长录音（Android 7.0+）
+
+基于 [eja/vox](https://github.com/eja/vox) 的 GPL-3.0 分支，针对低内存安卓录音设备增加长时间录音。上游版权与许可证保持不变。
+
+## 使用
+
+1. 安装本分支 APK（包名 `it.eja.vox.longrecord`，与上游可并存）。
+2. 设置 ASR：完整 HTTPS `/v1/audio/transcriptions` 地址、自己的 Key 和模型 ID。硅基流动可使用 `https://api.siliconflow.cn/v1/audio/transcriptions` 与 `XingChenAGI/XingChenASR-V3.2-Ultra`；是否可用以账号权限及接口实测为准。
+3. 设置 LLM：完整 HTTPS `/chat/completions` 地址、自己的 Key、模型和输出语言。没有内置密钥，也不需要 Vox 账号。
+4. 点麦克风开始，授予录音权限。通知栏可停止；锁屏和切后台由前台服务与唤醒锁维持录音。
+5. 每两分钟保存一个 16 kHz、16-bit、单声道 WAV（3.84 MB），依次上传；停止时保存最后不足两分钟的片段。
+6. 网络或服务失败不丢弃录音。进入「录音历史」选择会话，点「补传未完成分段」。只有成功落盘的分段文本才跳过重传；请求成功但进程在保存前退出时，该段可能再次计费。
+7. 全部分段转写完成后，点左上 AI 按钮 → Summary。长文本按块总结后合并，原转写与音频保留，摘要存入会话目录。
+
+## 长录音边界
+
+- 没有 15 分钟的应用录音上限；不等于无限资源。WAV 每小时约 115 MB，空间低于 16 MB 时停止并保留已写入音频。
+- 是「每两分钟分段转写」，不是逐字实时字幕。分段没有重叠，切分边界附近的单词可能影响识别。
+- 一次失败后暂停本轮后续上传，录音继续；联网后手动补传。成功分段无需重新识别。
+- 音频直接写入私有目录 `files/recordings/<会话时间>/`，不放临时缓存、不自动删除。进程被杀不会自动重新开启麦克风；再次打开历史可修复中断分段并补传。没有写入存储的尾部数据无法恢复。
+- 默认保留音频、转写和摘要。尚未增加导出、回放和删除界面；卸载会删除私有记录。备份应用私有目录后再卸载。
+- 云端处理会把音频或文字发送给你配置的服务商；Key 只保存在设备应用私有配置，不提交到仓库。系统云备份已关闭。
+- 保留上游分享音频导入功能，但导入文件仍整段上传；自动分段仅适用于本应用录音。
+- 安卓厂商的后台限制、断电或强制停止仍可能打断录音。先在目标设备验证，再用于重要会议。
+
+## 构建与验证
+
+需要 JDK 17、Android SDK 36，执行：
+
+```sh
+./gradlew testDebugUnitTest assembleDebug lintDebug
+```
+
+APK：`app/build/outputs/apk/debug/app-debug.apk`（开发签名）。当前分支不发布新的 Tag 或 Release。
+单元测试覆盖中断 WAV 修复、分段顺序、补传判定、单段大小和长总结输入不丢失。真机验证记录见仓库 `VALIDATION.md`。
+
+---
+
+## 上游说明
 
 
 
-# Vox
+
 
 **Vox** is a highly configurable Android application designed for seamless audio recording, speech-to-text transcription, and advanced AI-driven text processing. By leveraging external Automatic Speech Recognition (ASR) and Large Language Model (LLM) APIs, Vox empowers users to transcribe voice memos and immediately process the text for summarization, translation, grammatical correction, and custom contextual prompts.
 

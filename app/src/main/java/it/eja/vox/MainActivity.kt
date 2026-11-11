@@ -2,13 +2,9 @@
 
 package it.eja.vox
 
-import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.media.AudioFormat
-import android.media.AudioRecord
-import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -35,6 +31,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Refresh
 import androidx.core.content.ContextCompat
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
@@ -43,18 +42,12 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.*
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import org.commonmark.parser.Parser
 import org.commonmark.renderer.html.HtmlRenderer
 
 class MainActivity : ComponentActivity() {
-    private var isRecording = false
-    private val sampleRate = 16000
-    private val channelConfig = AudioFormat.CHANNEL_IN_MONO
-    private val audioFormat = AudioFormat.ENCODING_PCM_16BIT
     private val client = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.MINUTES)
         .readTimeout(5, TimeUnit.MINUTES)
@@ -95,7 +88,14 @@ class MainActivity : ComponentActivity() {
         var llmModel by remember { mutableStateOf(prefs.getString("llm_model", "") ?: "") }
         var language by remember { mutableStateOf(prefs.getString("language", "") ?: "") }
 
-        var recordingState by remember { mutableStateOf(false) }
+        val recording by RecordingState.status
+        val recordingState = recording.recording
+        var showHistory by remember { mutableStateOf(false) }
+        var selectedSession by remember { mutableStateOf("") }
+        val beginRecording = {
+            ContextCompat.startForegroundService(context,
+                Intent(context, RecordingService::class.java).setAction(RecordingService.START))
+        }
         var isUploading by remember { mutableStateOf(false) }
         var htmlResponse by remember { mutableStateOf(wrapHtml("Ready...", false)) }
         var transcriptText by remember { mutableStateOf("") }
@@ -113,9 +113,7 @@ class MainActivity : ComponentActivity() {
 
         val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
             if (isGranted) {
-                isRecording = true
-                recordingState = true
-                startWavRecording(context)
+                beginRecording()
             }
         }
 
@@ -146,12 +144,40 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        LaunchedEffect(recording.text, recording.session) {
+            if (recording.session.isNotEmpty()) {
+                selectedSession = recording.session
+                transcriptText = recording.text
+                htmlResponse = wrapHtml(recording.text, false)
+            }
+        }
+        if (showHistory) {
+            val sessions = File(context.filesDir, "recordings").listFiles()
+                ?.filter { it.isDirectory }?.sortedByDescending { it.name } ?: emptyList()
+            AlertDialog(onDismissRequest = { showHistory = false }, title = { Text("录音历史（音频保存在本机）") },
+                text = { Column(Modifier.verticalScroll(rememberScrollState())) {
+                    sessions.forEach { folder ->
+                        TextButton(onClick = {
+                            RecordingStore.recover(folder)
+                            selectedSession = folder.name
+                            transcriptText = RecordingStore.transcript(folder)
+                            val summary = File(folder, "summary.txt")
+                            htmlResponse = wrapHtml(if (summary.exists()) summary.readText() else transcriptText, false)
+                            showHistory = false
+                        }) { Text(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+                            .format(java.util.Date(folder.name.toLong())) + " · 待转写 ${RecordingStore.pending(folder).size} 段") }
+                    }
+                } }, confirmButton = { TextButton(onClick = { showHistory = false }) { Text("关闭") } })
+        }
+
+        val hasPending = selectedSession.isNotEmpty() && RecordingStore.pending(
+            File(context.filesDir, "recordings/$selectedSession")).isNotEmpty()
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
                     navigationIcon = {
                         if (transcriptText.isNotEmpty() && llmUrl.isNotEmpty()) {
-                            IconButton(onClick = { showActionMenu = true }) {
+                            IconButton(onClick = { showActionMenu = true }, enabled = !recording.processing && !isUploading && !hasPending) {
                                 Icon(Icons.Default.AutoAwesome, null)
                             }
                         }
@@ -159,47 +185,50 @@ class MainActivity : ComponentActivity() {
                     title = {
                         IconButton(
                             modifier = Modifier.size(64.dp),
-                            enabled = !isUploading,
+                            enabled = !isUploading && (!recording.processing || recordingState),
                             onClick = {
                                 if (!recordingState) {
                                     if (ContextCompat.checkSelfPermission(context, android.Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-                                        isRecording = true
-                                        recordingState = true
-                                        startWavRecording(context)
+                                        beginRecording()
                                     } else { permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO) }
                                 } else {
-                                    isRecording = false
-                                    recordingState = false
-                                    isUploading = true
-                                    thread {
-                                        Thread.sleep(500)
-                                        processUpload(File(context.cacheDir, "rec.wav"), url, token, voiceModel) { raw, html ->
-                                            runOnUiThread {
-                                                transcriptText = raw
-                                                htmlResponse = html
-                                                isUploading = false
-                                            }
-                                        }
-                                    }
+                                    context.startService(Intent(context, RecordingService::class.java).setAction(RecordingService.STOP))
                                 }
                             }
                         ) {
                             if (isUploading) CircularProgressIndicator(modifier = Modifier.size(32.dp), strokeWidth = 3.dp)
-                            else if (recordingState) Icon(Icons.Default.Stop, null, modifier = Modifier.size(48.dp), tint = Color.Red.copy(alpha = alpha))
-                            else Icon(Icons.Default.Mic, null, modifier = Modifier.size(48.dp))
+                            else if (recordingState) Icon(Icons.Default.Stop, "停止录音", modifier = Modifier.size(48.dp), tint = Color.Red.copy(alpha = alpha))
+                            else Icon(Icons.Default.Mic, "开始录音", modifier = Modifier.size(48.dp))
                         }
                     },
-                    actions = { IconButton(onClick = { showSettings = true }) { Icon(Icons.Default.Settings, null) } }
+                    actions = {
+                        IconButton(onClick = { showHistory = true }, enabled = !recording.processing) { Icon(Icons.Default.History, "录音历史") }
+                        IconButton(onClick = { showSettings = true }, enabled = !recording.processing) { Icon(Icons.Default.Settings, "设置") }
+                    }
                 )
             }
         ) { padding ->
             Column(modifier = Modifier.padding(padding)) {
                 if (isUploading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                Text("${recording.seconds / 60}:${(recording.seconds % 60).toString().padStart(2, '0')} · ${recording.message}",
+                    modifier = Modifier.padding(horizontal = 12.dp))
+                if (selectedSession.isNotEmpty() && !recording.processing) {
+                    if (hasPending) Text("还有录音分段未转写，补传完成后才能总结。", Modifier.padding(horizontal = 12.dp))
+                    TextButton(onClick = {
+                        ContextCompat.startForegroundService(context, Intent(context, RecordingService::class.java)
+                            .setAction(RecordingService.RETRY).putExtra("session", selectedSession))
+                    }) { Icon(Icons.Default.Refresh, null); Text("补传未完成分段") }
+                }
 
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
-                    factory = { WebView(it).apply { webViewClient = WebViewClient(); settings.javaScriptEnabled = true; setBackgroundColor(0) } },
-                    update = { it.loadDataWithBaseURL(null, htmlResponse, "text/html", "UTF-8", null) }
+                    factory = { WebView(it).apply { webViewClient = WebViewClient(); settings.javaScriptEnabled = false; setBackgroundColor(0) } },
+                    update = {
+                        if (it.tag != htmlResponse) {
+                            it.tag = htmlResponse
+                            it.loadDataWithBaseURL(null, htmlResponse, "text/html", "UTF-8", null)
+                        }
+                    }
                 )
             }
         }
@@ -216,10 +245,11 @@ class MainActivity : ComponentActivity() {
                             modifier = Modifier.clickable {
                                 showActionMenu = false
                                 isUploading = true
-                                var p = "Summarize the following text using only words."
-                                if (language.isNotEmpty()) p += " Using the $language language."
-                                p += "\n\n$transcriptText"
-                                callLLM(llmUrl, llmAuth, llmModel, p) { runOnUiThread { htmlResponse = it; isUploading = false } }
+                                val folder = selectedSession.takeIf { it.isNotEmpty() }?.let { File(context.filesDir, "recordings/$it") }
+                                summarize(llmUrl, llmAuth, llmModel, transcriptText, language) { result, success ->
+                                    if (success && folder != null) RecordingStore.atomicText(File(folder, "summary.txt"), result)
+                                    runOnUiThread { htmlResponse = wrapHtml(result, !success); isUploading = false }
+                                }
                             }
                         )
                         ListItem(
@@ -295,7 +325,7 @@ class MainActivity : ComponentActivity() {
                         Text("ASR", style = MaterialTheme.typography.titleSmall)
                         TextField(value = url, onValueChange = { url = it }, label = { Text("API URL") })
                         Spacer(modifier = Modifier.height(4.dp))
-                        TextField(value = token, onValueChange = { token = it }, label = { Text("Auth Token") })
+                        TextField(value = token, onValueChange = { token = it }, label = { Text("Auth Token") }, visualTransformation = PasswordVisualTransformation())
                         Spacer(modifier = Modifier.height(4.dp))
                         TextField(value = voiceModel, onValueChange = { voiceModel = it }, label = { Text("Model") })
 
@@ -303,7 +333,7 @@ class MainActivity : ComponentActivity() {
                         Text("LLM", style = MaterialTheme.typography.titleSmall)
                         TextField(value = llmUrl, onValueChange = { llmUrl = it }, label = { Text("API URL") })
                         Spacer(modifier = Modifier.height(4.dp))
-                        TextField(value = llmAuth, onValueChange = { llmAuth = it }, label = { Text("Auth Token") })
+                        TextField(value = llmAuth, onValueChange = { llmAuth = it }, label = { Text("Auth Token") }, visualTransformation = PasswordVisualTransformation())
                         Spacer(modifier = Modifier.height(4.dp))
                         TextField(value = llmModel, onValueChange = { llmModel = it }, label = { Text("Model") })
                         Spacer(modifier = Modifier.height(4.dp))
@@ -365,6 +395,33 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun summarize(url: String, auth: String, model: String, text: String, language: String,
+                          result: (String, Boolean) -> Unit) {
+        thread {
+            try {
+                val instruction = "总结录音：保留重要事实、数字、决定和待办，不编造。输出语言：${language.ifBlank { "中文" }}。"
+                fun request(part: String): String {
+                    val json = JSONObject().put("model", model).put("messages", JSONArray().put(
+                        JSONObject().put("role", "user").put("content", "$instruction\n\n$part")))
+                    val req = Request.Builder().url(url).header("Authorization", "Bearer $auth")
+                        .post(json.toString().toRequestBody("application/json".toMediaType())).build()
+                    return client.newCall(req).execute().use { response ->
+                        check(response.isSuccessful) { "HTTP ${response.code}" }
+                        JSONObject(response.body?.string() ?: "").getJSONArray("choices")
+                            .getJSONObject(0).getJSONObject("message").getString("content")
+                    }
+                }
+                var parts = RecordingStore.promptChunks(text)
+                var rounds = 0
+                while (parts.size > 1) {
+                    check(rounds++ < 8) { "总结过长，请稍后重试" }
+                    parts = RecordingStore.promptChunks(parts.map { request(it) }.joinToString("\n\n"))
+                }
+                result(request(parts.singleOrNull() ?: ""), true)
+            } catch (e: Exception) { result("总结失败（${e.javaClass.simpleName}），原录音和转写仍保留，请重试。", false) }
+        }
+    }
+
     private fun wrapHtml(content: String, isError: Boolean): String {
         val parser = Parser.builder().build()
         val document = parser.parse(content)
@@ -388,35 +445,4 @@ class MainActivity : ComponentActivity() {
     """.trimIndent()
     }
 
-    @SuppressLint("MissingPermission")
-    private fun startWavRecording(context: Context) {
-        val bufferSize = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
-        val recorder = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, channelConfig, audioFormat, bufferSize)
-        val outFile = File(context.cacheDir, "rec.wav")
-        thread {
-            val data = ByteArray(bufferSize)
-            FileOutputStream(outFile).use { fos ->
-                fos.write(ByteArray(44))
-                recorder.startRecording()
-                while (isRecording) {
-                    val read = recorder.read(data, 0, data.size)
-                    if (read > 0) fos.write(data, 0, read)
-                }
-                recorder.stop(); recorder.release(); fos.flush(); fos.fd.sync()
-            }
-            writeWavHeader(outFile)
-        }
-    }
-
-    private fun writeWavHeader(file: File) {
-        val audioLen = file.length() - 44
-        val byteRate = 16 * sampleRate / 8
-        val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
-            put("RIFF".toByteArray()); putInt((audioLen + 36).toInt()); put("WAVE".toByteArray())
-            put("fmt ".toByteArray()); putInt(16); putShort(1.toShort()); putShort(1.toShort())
-            putInt(sampleRate); putInt(byteRate); putShort(2.toShort()); putShort(16.toShort())
-            put("data".toByteArray()); putInt(audioLen.toInt())
-        }.array()
-        RandomAccessFile(file, "rw").use { it.seek(0); it.write(header); it.fd.sync() }
-    }
 }

@@ -11,11 +11,11 @@ android {
     }
 
     defaultConfig {
-        applicationId = "it.eja.vox"
+        applicationId = "it.eja.vox.longrecord"
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 600
+        versionName = "0.6.0-longrecord"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
