@@ -75,7 +75,7 @@ fun ApiSettingsDialog(prefs: SharedPreferences, dismiss: () -> Unit, saved: () -
             Row { (0..2).forEach { n -> TextButton({ index = n }) { Text(if (index == n) "【${n + 1}】" else "${n + 1}") } } }
             Row { Checkbox(profile.enabled, { update(profile.copy(enabled = it)) }); Text("启用此接口") }
             TextField(profile.name, { update(profile.copy(name = it)) }, label = { Text("接口名称") })
-            TextField(profile.url, { update(profile.copy(url = it)) }, label = { Text("完整 HTTPS 接口地址") })
+            TextField(profile.url, { update(profile.copy(url = it)) }, label = { Text("完整 HTTPS / WSS 接口地址") })
             TextField(profile.key, { update(profile.copy(key = it)) }, label = { Text("API Key") }, visualTransformation = PasswordVisualTransformation())
             TextField(profile.model, { update(profile.copy(model = it)) }, label = { Text("模型 ID") })
             Row { Checkbox(profile.free, { update(profile.copy(free = it)) }); Text("已在控制台确认有免费额度") }

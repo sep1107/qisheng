@@ -37,7 +37,7 @@ class ApiRouter(private val quota: ApiQuota, private val now: () -> Long = Syste
                 }
             }
             val uri = runCatching { URI(profile.url) }.getOrNull()
-            if (uri?.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null || profile.model.isBlank()) {
+            if (uri == null || uri.scheme !in listOf("https", "wss") || uri.host.isNullOrBlank() || uri.userInfo != null || profile.model.isBlank()) {
                 report("${profile.name} 配置不完整，已跳过"); continue
             }
             val host = uri.host.lowercase()

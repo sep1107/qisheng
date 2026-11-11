@@ -14,6 +14,8 @@ class CloudApi(private val prefs: SharedPreferences, private val report: (String
     private val client = OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(90, TimeUnit.SECONDS).callTimeout(120, TimeUnit.SECONDS).build()
     private val router = ApiRouter(PreferenceQuota(prefs))
+    private val paraformer = ParaformerApi(client)
+    private val cancelled = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private fun request(profile: ApiProfile, body: RequestBody): JSONObject {
         val request = Request.Builder().url(profile.url).header("Authorization", "Bearer ${profile.key}").post(body).build()
@@ -34,6 +36,8 @@ class CloudApi(private val prefs: SharedPreferences, private val report: (String
 
     fun transcribe(audio: File): String = router.run(ApiProfiles.load(prefs, "asr"),
         prefs.getBoolean("free_only", true), report) { p ->
+        if (cancelled.get()) throw ApiUnavailable("转写已取消，录音仍保存在本机")
+        if (p.url.startsWith("wss://")) return@run paraformer.transcribe(p, audio)
         val type = when (audio.extension.lowercase()) { "wav" -> "audio/wav"; "m4a" -> "audio/mp4"; else -> "audio/mpeg" }
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("file", audio.name, audio.asRequestBody(type.toMediaType()))
@@ -52,5 +56,5 @@ class CloudApi(private val prefs: SharedPreferences, private val report: (String
         catch (e: org.json.JSONException) { throw ApiUnavailable("总结接口响应格式错误，请检查配置") }
     }
 
-    fun cancel() = client.dispatcher.cancelAll()
+    fun cancel() { cancelled.set(true); paraformer.cancel(); client.dispatcher.cancelAll() }
 }

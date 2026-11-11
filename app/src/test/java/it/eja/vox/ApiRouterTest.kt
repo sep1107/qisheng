@@ -91,4 +91,9 @@ class ApiRouterTest {
         assertEquals("ok", router.run(listOf(a, b, c), true, {}) { attempts.add(it.id); "ok" })
         assertEquals(listOf("valid"), attempts)
     }
+    @Test fun encryptedWebSocketCanParticipateInFallback() {
+        val a = profile("ws", "a.example").copy(url = "wss://a.example/api-ws/v1/inference")
+        assertEquals("ok", ApiRouter(Quota()).run(listOf(a), true, {}) { "ok" })
+    }
+
 }

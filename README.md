@@ -24,7 +24,17 @@
 - 超时可能发生在服务端已经完成之后，切换或补传可能重复计费；柒声无法取消服务商计费。请在服务商设置消费上限、关闭自动充值。免费政策会变，不承诺永久免费，不自动注册账号。
 - 转写使用 OpenAI 兼容 `audio/transcriptions`，总结使用 `chat/completions`。只配置能提供对应接口的模型；百炼 `qwen3-asr-flash` 的聊天式音频接口不能直接填写为转写接口。
 
-当前可优先验证的组合：硅基流动星辰 ASR + 星辰文本总结；Groq 作为转写备用需先验证设备网络及账户限额。资料：[硅基流动价格](https://www.siliconflow.cn/pricing)、[Groq 限额](https://console.groq.com/docs/rate-limits)。实际免费资格、额度和付费切换均以各账号控制台为准。
+当前可优先验证的组合：硅基流动星辰 ASR + 星辰文本总结；百炼作为国内备用、Groq 作为需代理的额外备用；均需先验证设备网络及账户限额。资料：[硅基流动价格](https://www.siliconflow.cn/pricing)、[Groq 限额](https://console.groq.com/docs/rate-limits)。实际免费资格、额度和付费切换均以各账号控制台为准。
+
+## 百炼 Paraformer 国内备用（0.6.3）
+
+支持 `paraformer-realtime-v2` 的 WebSocket 协议。填写完整地址 `wss://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference`、该业务空间的专用 Key 和模型 ID，即可放入转写接口槽位。Key 只授权此模型即可，不需要开通 OSS。
+
+这里使用实时接口传输已经保存的 WAV 分段，界面仍是每两分钟分段转写，不提供逐字字幕。按 100 ms 音频帧发送，百炼备用时传输耗时约等于音频长度，可能晚于主接口出字；网络线程与录音线程独立。
+
+北京地域该模型目前每月有 36,000 秒免费额度，须在百炼控制台确认并开启该模型的“免费额度用完即停”。它和 `paraformer-v2` 录音文件接口是不同模型，额度与开关须分别核对。免费耗尽、限流或网络失败时尝试下一个接口，全部不可用则保留音频。专用域名、账号凭据和实际余额不写入公开仓库。
+
+参考：[官方 WebSocket 协议](https://help.aliyun.com/zh/model-studio/websocket-for-paraformer-real-time-service)、[模型价格与每月额度](https://help.aliyun.com/zh/model-studio/model-pricing)。
 
 ## 长录音边界
 
