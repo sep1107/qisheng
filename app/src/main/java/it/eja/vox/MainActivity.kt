@@ -106,36 +106,19 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        LaunchedEffect(sharedUri) {
-            sharedUri?.let { uri ->
-                if (recording.processing) {
-                    htmlResponse = wrapHtml("请先结束当前录音/转写，再导入音频。", true)
-                    return@LaunchedEffect
-                }
-                isUploading = true
-                thread {
-                    try {
-                        val tempFile = File(context.cacheDir, "shared_audio")
-                        context.contentResolver.openInputStream(uri)?.use { input ->
-                            FileOutputStream(tempFile).use { output -> input.copyTo(output) }
-                        }
-                        processUpload(tempFile) { raw, html ->
-                            runOnUiThread {
-                                transcriptText = raw
-                                htmlResponse = html
-                                isUploading = false
-                                tempFile.delete()
-                            }
-                        }
-                    } catch (e: Exception) {
-                        runOnUiThread {
-                            htmlResponse = wrapHtml("Error: ${e.message}", true)
-                            isUploading = false
-                        }
-                    }
-                }
+        fun importAudio(uri: Uri) {
+            if (recording.processing || isUploading) return
+            ContextCompat.startForegroundService(context, Intent(context, RecordingService::class.java)
+                .setAction(RecordingService.IMPORT).setData(uri)
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        }
+        val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            uri?.let {
+                runCatching { context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                importAudio(it)
             }
         }
+        LaunchedEffect(sharedUri) { sharedUri?.let { importAudio(it) } }
 
         LaunchedEffect(recording.text, recording.session) {
             if (recording.session.isNotEmpty()) {
@@ -163,8 +146,9 @@ class MainActivity : ComponentActivity() {
                 } }, confirmButton = { TextButton(onClick = { showHistory = false }) { Text("关闭") } })
         }
 
-        val hasPending = selectedSession.isNotEmpty() && RecordingStore.pending(
-            File(context.filesDir, "recordings/$selectedSession")).isNotEmpty()
+        val selectedFolder = File(context.filesDir, "recordings/$selectedSession")
+        val incompleteImport = selectedSession.isNotEmpty() && File(selectedFolder, "import-incomplete.txt").exists() && !File(selectedFolder, "import-complete.txt").exists()
+        val hasPending = selectedSession.isNotEmpty() && (incompleteImport || RecordingStore.pending(selectedFolder).isNotEmpty())
         Scaffold(
             topBar = {
                 CenterAlignedTopAppBar(
@@ -195,6 +179,7 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     actions = {
+                        TextButton(onClick = { importLauncher.launch(arrayOf("audio/*")) }, enabled = !recording.processing && !isUploading) { Text("导入") }
                         IconButton(onClick = { showHistory = true }, enabled = !recording.processing) { Icon(Icons.Default.History, "录音历史") }
                         IconButton(onClick = { showSettings = true }, enabled = !recording.processing) { Icon(Icons.Default.Settings, "设置") }
                     }
@@ -207,7 +192,8 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.padding(horizontal = 12.dp))
                 if (selectedSession.isNotEmpty() && !recording.processing) {
                     if (hasPending) Text("还有录音分段未转写，补传完成后才能总结。", Modifier.padding(horizontal = 12.dp))
-                    TextButton(onClick = {
+                    if (incompleteImport) Text("导入未完成，请重新导入原文件；当前部分不可总结。")
+                    TextButton(enabled = !incompleteImport, onClick = {
                         ContextCompat.startForegroundService(context, Intent(context, RecordingService::class.java)
                             .setAction(RecordingService.RETRY).putExtra("session", selectedSession))
                     }) { Icon(Icons.Default.Refresh, null); Text("补传未完成分段") }
@@ -315,16 +301,6 @@ class MainActivity : ComponentActivity() {
                 language = prefs.getString("language", "中文") ?: "中文"
                 showSettings = false
             })
-        }
-    }
-
-    private fun processUpload(file: File, onResult: (String, String) -> Unit) {
-        try {
-            val text = cloud.transcribe(file)
-            onResult(text, wrapHtml(text, false))
-        } catch (e: Exception) {
-            val message = if (e is ApiUnavailable) e.message ?: "接口不可用" else "转写失败，原文件仍保留"
-            onResult("", wrapHtml(message, true))
         }
     }
 

@@ -34,6 +34,7 @@ class RecordingService : Service() {
         const val START = "record"
         const val STOP = "stop"
         const val RETRY = "retry"
+        const val IMPORT = "import"
     }
     @Volatile private var recording = false
     private var worker: Thread? = null
@@ -65,32 +66,43 @@ class RecordingService : Service() {
         }
         if (worker != null) return START_NOT_STICKY
         val root = File(filesDir, "recordings").apply { mkdirs() }
+        val importing = intent?.action == IMPORT
         val retry = intent?.action == RETRY
+        if (importing && intent?.data == null) { stopSelf(); return START_NOT_STICKY }
         val name = intent?.getStringExtra("session")
-        if (retry && (name == null || !Regex("[0-9]+").matches(name) || !File(root, name).isDirectory)) {
+        if (retry && (name == null || !Regex("[0-9]+").matches(name) || !File(root, name).isDirectory ||
+                (File(root, "$name/import-incomplete.txt").exists() && !File(root, "$name/import-complete.txt").exists()))) {
             stopSelf(); return START_NOT_STICKY
         }
         session = File(root, if (retry) name!! else System.currentTimeMillis().toString()).apply { mkdirs() }
-        recording = !retry
+        recording = !retry && !importing
         ServiceCompat.startForeground(this, 1, notification(if (retry) "补传录音" else "正在录音"),
             when {
-                retry && Build.VERSION.SDK_INT >= 29 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                (retry || importing) && Build.VERSION.SDK_INT >= 29 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
                 Build.VERSION.SDK_INT >= 30 -> ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                 else -> 0
             })
         wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "vox:recording").apply { acquire(24 * 60 * 60 * 1000L) }
         RecordingState.update { RecordingStatus(session = session!!.name, recording = recording,
-            processing = true, message = if (retry) "正在补传，成功分段不会重复上传" else "正在录音，每 2 分钟保存并转写") }
+            processing = true, message = if (importing) "正在导入并分段，原文件保持不变" else if (retry) "正在补传，成功分段不会重复上传" else "正在录音，每 2 分钟保存并转写") }
         worker = thread(name = "vox-capture") {
             val folder = session!!
             try {
                 RecordingStore.recover(folder)
-                if (retry) RecordingStore.pending(folder).forEach { enqueue(it) }
+                if (importing) {
+                    RecordingStore.atomicText(File(folder, "import-incomplete.txt"), "导入尚未完成，请勿总结；失败后请重新导入原文件")
+                    AudioImporter.import(this, intent!!.data!!, folder) { seconds ->
+                        RecordingState.update { it.copy(seconds = seconds, message = "正在导入并分段：${seconds / 60} 分钟") }
+                    }
+                    RecordingStore.atomicText(File(folder, "import-complete.txt"), "导入完整")
+                    RecordingStore.pending(folder).forEach { enqueue(it) }
+                }
+                else if (retry) RecordingStore.pending(folder).forEach { enqueue(it) }
                 else capture(folder)
             } catch (e: Exception) {
-                RecordingStore.atomicText(File(folder, "capture-error.txt"), "录音中断：${e.javaClass.simpleName}")
-                RecordingState.update { it.copy(message = "录音中断，已写入音频可在历史中恢复") }
+                RecordingStore.atomicText(File(folder, "capture-error.txt"), "处理中断：${e.javaClass.simpleName}")
+                RecordingState.update { it.copy(message = "处理失败，已保留写入部分；导入失败请重新选择原文件") }
             } finally {
                 recording = false
                 RecordingState.update { it.copy(recording = false) }
