@@ -16,6 +16,18 @@ class ApiRouterTest {
     private fun profile(id: String, host: String, free: Boolean = true, cap: Int = 0) =
         ApiProfile(id, id, "https://$host/v1/audio/transcriptions", "private-key", "model", true, free, cap)
 
+    @Test fun emptyTranscriptionTriesNextProviderWithoutNetworkCooldown() {
+        val quota = Quota()
+        val attempts = mutableListOf<String>()
+        val result = ApiRouter(quota).run(listOf(profile("a", "a.example"), profile("b", "b.example")), true, {}) {
+            attempts.add(it.id)
+            if (it.id == "a") RecordingStore.requireTranscript(" ") else "备用识别成功"
+        }
+        assertEquals(listOf("a", "b"), attempts)
+        assertEquals("备用识别成功", result)
+        assertTrue(quota.cooldown.isEmpty())
+    }
+
     @Test fun rateLimitSkipsSameProviderKeysAndHonorsRetryAfter() {
         val quota = Quota()
         val attempts = mutableListOf<String>()

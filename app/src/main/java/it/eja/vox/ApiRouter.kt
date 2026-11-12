@@ -8,7 +8,9 @@ data class ApiProfile(val id: String, val name: String, val url: String, val key
                       val free: Boolean = false, val dailyLimit: Int = 0, val freeUntil: String = "")
 
 class ApiHttpError(val status: Int, val retrySeconds: Long? = null) : IOException()
-class ApiUnavailable(message: String) : IOException(message)
+open class ApiUnavailable(message: String) : IOException(message)
+
+class EmptyTranscription : ApiUnavailable("接口未识别到文字，录音已保留，请检查收音")
 
 interface ApiQuota {
     fun blockedUntil(host: String): Long
@@ -62,6 +64,8 @@ class ApiRouter(private val quota: ApiQuota, private val now: () -> Long = Syste
                 }
                 quota.block(host, now() + seconds.coerceAtMost(31_536_000L) * 1000)
                 report("${profile.name} 返回 HTTP ${e.status}，已冷却并尝试下一接口")
+            } catch (e: EmptyTranscription) {
+                report("${profile.name} 返回空文字，尝试下一接口；录音仍保留")
             } catch (e: ApiUnavailable) {
                 throw e
             } catch (e: IOException) {

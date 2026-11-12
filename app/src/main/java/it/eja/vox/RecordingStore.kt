@@ -27,7 +27,7 @@ object RecordingStore {
     fun hasTranscript(file: File) = file.isFile && file.readText().isNotBlank()
 
     fun requireTranscript(text: String): String {
-        if (text.isBlank()) throw ApiUnavailable("接口未识别到文字，录音已保留，请补传或检查收音")
+        if (text.isBlank()) throw EmptyTranscription()
         return text.trim()
     }
 
