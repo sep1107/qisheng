@@ -80,13 +80,15 @@ class MainActivity : ComponentActivity() {
         val recording by RecordingState.status
         val recordingState = recording.recording
         var showHistory by remember { mutableStateOf(false) }
+        var showSources by remember { mutableStateOf(false) }
+        var showUpdate by remember { mutableStateOf(false) }
         var selectedSession by remember { mutableStateOf("") }
         val beginRecording = {
             ContextCompat.startForegroundService(context,
                 Intent(context, RecordingService::class.java).setAction(RecordingService.START))
         }
         var isUploading by remember { mutableStateOf(false) }
-        var htmlResponse by remember { mutableStateOf(wrapHtml("Ready...", false)) }
+        var htmlResponse by remember { mutableStateOf(wrapHtml("选择系统录音，或点击麦克风开始录音", false)) }
         var transcriptText by remember { mutableStateOf("") }
         var showSettings by remember { mutableStateOf(false) }
         var showActionMenu by remember { mutableStateOf(false) }
@@ -106,10 +108,12 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        fun importAudio(uri: Uri) {
-            if (recording.processing || isUploading) return
+        fun importAudio(uri: Uri, source: SourceRecording? = null, autoSummary: Boolean = false) {
+            if (recording.processing || isUploading || RecordingService.busy) return
             ContextCompat.startForegroundService(context, Intent(context, RecordingService::class.java)
                 .setAction(RecordingService.IMPORT).setData(uri)
+                .putExtra("sourceIdentity", source?.identity).putExtra("sourceName", source?.name)
+                .putExtra("autoSummary", autoSummary)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
         }
         val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -118,33 +122,46 @@ class MainActivity : ComponentActivity() {
                 importAudio(it)
             }
         }
+        val treeLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+            uri?.let {
+                runCatching {
+                    context.contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    prefs.edit().putString("recording_tree", it.toString()).apply()
+                }
+            }
+            showSources = true
+        }
+        fun selectSession(folder: File) {
+            RecordingStore.recover(folder)
+            selectedSession = folder.name
+            transcriptText = RecordingStore.transcript(folder)
+            val summary = File(folder, "summary.txt")
+            htmlResponse = wrapHtml(if (summary.exists()) summary.readText() else transcriptText, false)
+            showHistory = false; showSources = false
+        }
+        if (showSources) SystemRecordingsDialog(prefs, File(context.filesDir, "recordings"), recording.processing || isUploading,
+            chooseFolder = { showSources = false; treeLauncher.launch(null) },
+            chooseFile = { showSources = false; importLauncher.launch(arrayOf("audio/*")) },
+            close = { showSources = false }, import = { source, auto -> showSources = false; importAudio(Uri.parse(source.uri), source, auto) },
+            open = { selectSession(it) })
+        if (showUpdate) UpdateDialog(close = { showUpdate = false })
         LaunchedEffect(sharedUri) { sharedUri?.let { importAudio(it) } }
 
-        LaunchedEffect(recording.text, recording.session) {
+        LaunchedEffect(recording.text, recording.session, recording.recording, recording.summary) {
             if (recording.session.isNotEmpty()) {
                 selectedSession = recording.session
                 transcriptText = recording.text
-                htmlResponse = wrapHtml(recording.text, false)
+                htmlResponse = wrapHtml(when {
+                    recording.summary.isNotBlank() -> recording.summary
+                    else -> recording.text
+                }, false)
             }
         }
-        if (showHistory) {
-            val sessions = File(context.filesDir, "recordings").listFiles()
-                ?.filter { it.isDirectory }?.sortedByDescending { it.name } ?: emptyList()
-            AlertDialog(onDismissRequest = { showHistory = false }, title = { Text("录音历史（音频保存在本机）") },
-                text = { Column(Modifier.verticalScroll(rememberScrollState())) {
-                    sessions.forEach { folder ->
-                        TextButton(onClick = {
-                            RecordingStore.recover(folder)
-                            selectedSession = folder.name
-                            transcriptText = RecordingStore.transcript(folder)
-                            val summary = File(folder, "summary.txt")
-                            htmlResponse = wrapHtml(if (summary.exists()) summary.readText() else transcriptText, false)
-                            showHistory = false
-                        }) { Text(java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
-                            .format(java.util.Date(folder.name.toLong())) + " · 待转写 ${RecordingStore.pending(folder).size} 段") }
-                    }
-                } }, confirmButton = { TextButton(onClick = { showHistory = false }) { Text("关闭") } })
-        }
+        if (showHistory) HistoryDialog(File(context.filesDir, "recordings"), recording.processing || isUploading,
+            close = { showHistory = false }, select = { selectSession(it) }, trashed = { id ->
+                if (selectedSession == id) { selectedSession = ""; transcriptText = ""; htmlResponse = wrapHtml("已移入回收站，可在历史中恢复", false) }
+                RecordingState.update { if (it.session == id) RecordingStatus() else it }
+            })
 
         val selectedFolder = File(context.filesDir, "recordings/$selectedSession")
         val incompleteImport = selectedSession.isNotEmpty() && File(selectedFolder, "import-incomplete.txt").exists() && !File(selectedFolder, "import-complete.txt").exists()
@@ -155,7 +172,7 @@ class MainActivity : ComponentActivity() {
                     navigationIcon = {
                         if (transcriptText.isNotEmpty() && llmConfigured) {
                             IconButton(onClick = { showActionMenu = true }, enabled = !recording.processing && !isUploading && !hasPending) {
-                                Icon(Icons.Default.AutoAwesome, null)
+                                Icon(Icons.Default.AutoAwesome, "AI 操作")
                             }
                         }
                     },
@@ -179,14 +196,20 @@ class MainActivity : ComponentActivity() {
                         }
                     },
                     actions = {
-                        TextButton(onClick = { importLauncher.launch(arrayOf("audio/*")) }, enabled = !recording.processing && !isUploading) { Text("导入") }
-                        IconButton(onClick = { showHistory = true }, enabled = !recording.processing) { Icon(Icons.Default.History, "录音历史") }
-                        IconButton(onClick = { showSettings = true }, enabled = !recording.processing) { Icon(Icons.Default.Settings, "设置") }
+                        TextButton(onClick = { showSources = true }, enabled = !recording.processing && !isUploading) { Text("系统录音") }
+                        IconButton(onClick = { showHistory = true }, enabled = !recording.processing && !isUploading) { Icon(Icons.Default.History, "录音历史") }
+                        IconButton(onClick = { showSettings = true }, enabled = !recording.processing && !isUploading) { Icon(Icons.Default.Settings, "设置") }
                     }
                 )
             }
         ) { padding ->
             Column(modifier = Modifier.padding(padding)) {
+                Row {
+                    TextButton({ showUpdate = true }, enabled = !recording.processing && !isUploading) { Text("检查更新") }
+                    Row { Checkbox(prefs.getBoolean("live_enabled", true), { prefs.edit().putBoolean("live_enabled", it).apply(); apiRevision++ }, enabled = !recording.processing)
+                        Text("实时字幕") }
+                }
+                if (recording.liveMessage.isNotBlank()) Text(recording.liveMessage, Modifier.padding(horizontal = 12.dp))
                 if (isUploading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
                 Text("${recording.seconds / 60}:${(recording.seconds % 60).toString().padStart(2, '0')} · ${recording.message}",
                     modifier = Modifier.padding(horizontal = 12.dp))
@@ -199,27 +222,40 @@ class MainActivity : ComponentActivity() {
                     }) { Icon(Icons.Default.Refresh, null); Text("补传未完成分段") }
                 }
 
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { WebView(it).apply { webViewClient = WebViewClient(); settings.javaScriptEnabled = false; setBackgroundColor(0) } },
-                    update = {
-                        if (it.tag != htmlResponse) {
-                            it.tag = htmlResponse
-                            it.loadDataWithBaseURL(null, htmlResponse, "text/html", "UTF-8", null)
-                        }
+                if (recordingState && recording.liveText.isNotBlank()) {
+                    val liveScroll = rememberScrollState()
+                    LaunchedEffect(recording.liveText) {
+                        withFrameNanos { }
+                        liveScroll.scrollTo(liveScroll.maxValue)
                     }
-                )
+                    Column(Modifier.fillMaxSize().padding(16.dp).verticalScroll(liveScroll)) {
+                        Text("实时字幕预览 · 完整逐字稿随后按分段保存")
+                        Text(recording.liveText)
+                    }
+                } else {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { WebView(it).apply { webViewClient = WebViewClient(); settings.javaScriptEnabled = false; setBackgroundColor(0) } },
+                        update = {
+                            if (it.tag != htmlResponse) {
+                                it.tag = htmlResponse
+                                it.loadDataWithBaseURL(null, htmlResponse, "text/html", "UTF-8", null)
+                            }
+                        }
+                    )
+                }
+
             }
         }
 
         if (showActionMenu) {
             AlertDialog(
                 onDismissRequest = { showActionMenu = false },
-                title = { Text("AI Actions") },
+                title = { Text("AI 操作") },
                 text = {
                     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                         ListItem(
-                            headlineContent = { Text("Summary") },
+                            headlineContent = { Text("总结") },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             modifier = Modifier.clickable {
                                 showActionMenu = false
@@ -232,7 +268,7 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                         ListItem(
-                            headlineContent = { Text("Translation") },
+                            headlineContent = { Text("翻译") },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             modifier = Modifier.clickable {
                                 showActionMenu = false
@@ -241,7 +277,7 @@ class MainActivity : ComponentActivity() {
                             }
                         )
                         ListItem(
-                            headlineContent = { Text("Fix Grammar") },
+                            headlineContent = { Text("纠正语法") },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             modifier = Modifier.clickable {
                                 showActionMenu = false
@@ -255,7 +291,7 @@ class MainActivity : ComponentActivity() {
                         TextField(
                             value = otherPrompt,
                             onValueChange = { otherPrompt = it },
-                            label = { Text("Other") },
+                            label = { Text("其他要求") },
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -269,18 +305,18 @@ class MainActivity : ComponentActivity() {
                                 runOnUiThread { htmlResponse = it; isUploading = false }
                             }
                         }
-                    }) { Text("Run") }
+                    }) { Text("执行") }
                 },
-                dismissButton = { TextButton(onClick = { showActionMenu = false }) { Text("Cancel") } }
+                dismissButton = { TextButton(onClick = { showActionMenu = false }) { Text("取消") } }
             )
         }
 
         if (showTranslationDialog) {
             AlertDialog(
                 onDismissRequest = { showTranslationDialog = false },
-                title = { Text("Select Language") },
+                title = { Text("选择语言") },
                 text = {
-                    TextField(value = targetLang, onValueChange = { targetLang = it }, label = { Text("Language") }, modifier = Modifier.fillMaxWidth())
+                    TextField(value = targetLang, onValueChange = { targetLang = it }, label = { Text("语言") }, modifier = Modifier.fillMaxWidth())
                 },
                 confirmButton = {
                     TextButton(onClick = {
@@ -289,9 +325,9 @@ class MainActivity : ComponentActivity() {
                         callLLM("Translate the following text into $targetLang\n\n$transcriptText") {
                             runOnUiThread { htmlResponse = it; isUploading = false }
                         }
-                    }) { Text("Translate") }
+                    }) { Text("翻译") }
                 },
-                dismissButton = { TextButton(onClick = { showTranslationDialog = false }) { Text("Cancel") } }
+                dismissButton = { TextButton(onClick = { showTranslationDialog = false }) { Text("取消") } }
             )
         }
 
@@ -314,15 +350,7 @@ class MainActivity : ComponentActivity() {
     private fun summarize(text: String, language: String, result: (String, Boolean) -> Unit) {
         thread {
             try {
-                val instruction = "总结录音：保留重要事实、数字、决定和待办，不编造。输出语言：${language.ifBlank { "中文" }}。"
-                fun request(part: String) = cloud.chat("$instruction\n\n$part")
-                var parts = RecordingStore.promptChunks(text)
-                var rounds = 0
-                while (parts.size > 1) {
-                    check(rounds++ < 8) { "总结过长，请稍后重试" }
-                    parts = RecordingStore.promptChunks(parts.map { request(it) }.joinToString("\n\n"))
-                }
-                result(request(parts.singleOrNull() ?: ""), true)
+                result(RecordingSummary.generate(cloud, text, language), true)
             } catch (e: Exception) {
                 result(if (e is ApiUnavailable) e.message ?: "接口不可用" else "总结失败，原录音和转写仍保留，请重试。", false)
             }

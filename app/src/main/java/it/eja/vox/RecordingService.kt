@@ -18,7 +18,8 @@ import kotlin.concurrent.thread
 data class RecordingStatus(
     val session: String = "", val recording: Boolean = false,
     val processing: Boolean = false, val seconds: Long = 0,
-    val text: String = "", val message: String = "准备就绪"
+    val text: String = "", val message: String = "准备就绪",
+    val liveText: String = "", val liveMessage: String = "", val summary: String = ""
 )
 
 object RecordingState {
@@ -35,6 +36,7 @@ class RecordingService : Service() {
         const val STOP = "stop"
         const val RETRY = "retry"
         const val IMPORT = "import"
+        @Volatile var busy = false; private set
     }
     @Volatile private var recording = false
     private var worker: Thread? = null
@@ -47,6 +49,7 @@ class RecordingService : Service() {
         }
     }
     private var uploadFailed = false
+    private var live: LiveTranscriber? = null
 
     override fun onBind(intent: Intent?) = null
 
@@ -75,6 +78,7 @@ class RecordingService : Service() {
             stopSelf(); return START_NOT_STICKY
         }
         session = File(root, if (retry) name!! else System.currentTimeMillis().toString()).apply { mkdirs() }
+        busy = true
         recording = !retry && !importing
         ServiceCompat.startForeground(this, 1, notification(if (retry) "补传录音" else "正在录音"),
             when {
@@ -95,6 +99,8 @@ class RecordingService : Service() {
                     AudioImporter.import(this, intent!!.data!!, folder) { seconds ->
                         RecordingState.update { it.copy(seconds = seconds, message = "正在导入并分段：${seconds / 60} 分钟") }
                     }
+                    intent.getStringExtra("sourceIdentity")?.let { RecordingStore.atomicText(File(folder, "source.txt"), it) }
+                    intent.getStringExtra("sourceName")?.let { RecordingStore.atomicText(File(folder, "name.txt"), it.take(100)) }
                     RecordingStore.atomicText(File(folder, "import-complete.txt"), "导入完整")
                     RecordingStore.pending(folder).forEach { enqueue(it) }
                 }
@@ -109,8 +115,20 @@ class RecordingService : Service() {
                 uploads.execute {
                     val pending = RecordingStore.pending(folder).size
                     val captureError = File(folder, "capture-error.txt").exists()
-                    RecordingState.update { it.copy(processing = false, text = RecordingStore.transcript(folder),
+                    var summary = ""
+                    var summaryFailed = false
+                    if (importing && intent?.getBooleanExtra("autoSummary", false) == true && pending == 0 && !captureError) {
+                        RecordingState.update { it.copy(message = "转写完成，正在生成总结") }
+                        try {
+                            summary = RecordingSummary.generate(cloud, RecordingStore.transcript(folder), getSharedPreferences("vox_prefs", MODE_PRIVATE).getString("language", "中文") ?: "中文")
+                            RecordingStore.atomicText(File(folder, "summary.txt"), summary)
+                        } catch (_: Exception) { summaryFailed = true }
+                    }
+                    busy = false
+                    RecordingState.update { it.copy(processing = false, text = RecordingStore.transcript(folder), summary = summary,
+
                         message = when {
+                            summaryFailed -> "转写已保存，总结失败，可在 AI 操作中重试"
                             captureError -> "录音曾中断，保留原音频；请检查历史记录"
                             pending > 0 -> "已保存，$pending 段待转写；联网并检查配置后点补传"
                             RecordingStore.segments(folder).isEmpty() -> "未收到有效音频，请检查麦克风"
@@ -135,6 +153,11 @@ class RecordingService : Service() {
         var lastSecond = -1L
         try {
             check(recorder.state == AudioRecord.STATE_INITIALIZED) { "麦克风初始化失败" }
+            val prefs = getSharedPreferences("vox_prefs", MODE_PRIVATE)
+            if (prefs.getBoolean("live_enabled", true)) {
+                live = LiveTranscriber(prefs, { value -> RecordingState.update { it.copy(liveText = value) } },
+                    { value -> RecordingState.update { it.copy(liveMessage = value) } }).also { it.start() }
+            }
             recorder.startRecording()
             val buffer = ByteArray(8192)
             while (recording) {
@@ -142,6 +165,7 @@ class RecordingService : Service() {
                 val count = recorder.read(buffer, 0, buffer.size)
                 check(count > 0) { "麦克风读取失败" }
                 writer.write(buffer, count)
+                live?.offer(buffer, count)
                 total += count
                 val second = total / RecordingStore.BYTES_PER_SECOND
                 if (second != lastSecond) {
@@ -155,6 +179,7 @@ class RecordingService : Service() {
             if (recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING) recorder.stop()
             recorder.release()
             writer.close()
+            live?.finish()
         }
     }
 
@@ -183,6 +208,8 @@ class RecordingService : Service() {
 
     override fun onDestroy() {
         recording = false
+        busy = false
+        live?.cancel()
         cloud.cancel()
         if (wakeLock?.isHeld == true) wakeLock?.release()
         uploads.shutdown()

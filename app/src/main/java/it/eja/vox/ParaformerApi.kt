@@ -12,10 +12,13 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /** Only finalized sentences are saved; partial revisions must not duplicate text. */
-internal class ParaformerResults {
+internal class ParaformerResults(private val maxCharacters: Int = Int.MAX_VALUE) {
     private val sentences = sortedMapOf<Long, String>()
     @Synchronized fun update(begin: Long, text: String, final: Boolean) {
-        if (final) sentences[begin] = text
+        if (final) {
+            sentences[begin] = text.takeLast(maxCharacters)
+            while (sentences.size > 1 && sentences.values.sumOf { it.length } > maxCharacters) sentences.remove(sentences.firstKey())
+        }
     }
     @Synchronized fun text() = sentences.values.joinToString("")
 }
@@ -27,10 +30,26 @@ class ParaformerApi(private val client: OkHttpClient) {
         if (profile.model != "paraformer-realtime-v2" || audio.extension.lowercase() != "wav") {
             throw ApiUnavailable("百炼直传目前支持 paraformer-realtime-v2 和本机 WAV 录音")
         }
+        return stream(profile, "wav", { socket, checkFailure ->
+            audio.inputStream().use { input ->
+                val buffer = ByteArray(3200)
+                while (true) {
+                    checkFailure()
+                    val n = input.read(buffer)
+                    if (n < 0) break
+                    if (!socket.send(buffer.toByteString(0, n))) throw IOException("百炼音频发送失败")
+                    Thread.sleep(100)
+                }
+            }
+        })
+    }
+
+    fun stream(profile: ApiProfile, format: String,
+               sendAudio: (WebSocket, () -> Unit) -> Unit, preview: (String) -> Unit = {}): String {
         val started = CountDownLatch(1)
         val finished = CountDownLatch(1)
         val failure = AtomicReference<IOException?>()
-        val results = ParaformerResults()
+        val results = ParaformerResults(if (format == "pcm") 3000 else Int.MAX_VALUE)
         val id = UUID.randomUUID().toString()
         fun fail(error: IOException) { failure.compareAndSet(null, error); started.countDown(); finished.countDown() }
         fun command(action: String, payload: JSONObject) = JSONObject().put("header", JSONObject()
@@ -40,7 +59,7 @@ class ParaformerApi(private val client: OkHttpClient) {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 val payload = JSONObject().put("task_group", "audio").put("task", "asr")
                     .put("function", "recognition").put("model", profile.model).put("input", JSONObject())
-                    .put("parameters", JSONObject().put("format", "wav").put("sample_rate", 16000).put("heartbeat", true))
+                    .put("parameters", JSONObject().put("format", format).put("sample_rate", 16000).put("heartbeat", true))
                 if (!webSocket.send(command("run-task", payload))) fail(IOException("百炼连接已关闭"))
             }
 
@@ -55,6 +74,8 @@ class ParaformerApi(private val client: OkHttpClient) {
                             .optJSONObject("sentence")?.let { sentence ->
                                 results.update(sentence.getLong("begin_time"), sentence.optString("text"),
                                     sentence.optBoolean("sentence_end"))
+                                val partial = if (sentence.optBoolean("sentence_end")) "" else sentence.optString("text")
+                                preview((results.text() + partial).takeLast(3000))
                             }
                         "task-finished" -> { finished.countDown(); webSocket.close(1000, null) }
                         "task-failed" -> {
@@ -89,17 +110,7 @@ class ParaformerApi(private val client: OkHttpClient) {
         try {
             if (!started.await(30, TimeUnit.SECONDS)) throw IOException("百炼启动超时")
             failure.get()?.let { throw it }
-            // Pace 100 ms frames so a recorded segment follows the documented streaming protocol.
-            audio.inputStream().use { input ->
-                val buffer = ByteArray(3200)
-                while (true) {
-                    failure.get()?.let { throw it }
-                    val n = input.read(buffer)
-                    if (n < 0) break
-                    if (!socket.send(buffer.toByteString(0, n))) throw IOException("百炼音频发送失败")
-                    Thread.sleep(100)
-                }
-            }
+            sendAudio(socket) { failure.get()?.let { throw it } }
             failure.get()?.let { throw it }
             if (!socket.send(command("finish-task", JSONObject().put("input", JSONObject())))) throw IOException("百炼连接已关闭")
             if (!finished.await(60, TimeUnit.SECONDS)) throw IOException("百炼结果等待超时")
