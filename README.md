@@ -146,3 +146,5 @@ To build the project locally:
 2. Open the project in Android Studio.
 3. Sync the Gradle files to download dependencies (Jetpack Compose, OkHttp, CommonMark, etc.).
 4. Build and deploy to your emulator or physical device.
+
+应用图标沿用小肥鱼角色的淡蓝米白水彩画风，加入麦克风；原图与生成说明见 [artwork](artwork/README.md)。Android 8 以上提供自适应图标。
