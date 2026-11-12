@@ -29,6 +29,16 @@ object SessionLibrary {
         val destination = folder(root, id)
         check(source.isDirectory && !destination.exists() && source.renameTo(destination)) { "无法恢复" }
     }
+    fun purge(root: File, id: String) {
+        val target = folder(File(root, "trash"), id)
+        require(target.isDirectory)
+        fun remove(file: File) {
+            require(file.canonicalPath.startsWith(target.canonicalPath + File.separator) || file == target)
+            if (file.isDirectory) file.listFiles()?.forEach(::remove)
+            check(file.delete()) { "清除失败，请重试" }
+        }
+        remove(target)
+    }
     fun importIndex(root: File): Map<String, String> = buildMap {
         sessions(root).forEach { folder ->
             val source = File(folder, "source.txt")

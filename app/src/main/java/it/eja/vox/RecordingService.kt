@@ -186,7 +186,7 @@ class RecordingService : Service() {
     private fun enqueue(audio: File) {
         uploads.execute {
             val textFile = File(audio.parentFile, audio.nameWithoutExtension + ".txt")
-            if (textFile.exists() || uploadFailed) return@execute
+            if (RecordingStore.hasTranscript(textFile) || uploadFailed) return@execute
             try {
                 RecordingStore.atomicText(textFile, cloud.transcribe(audio))
                 RecordingState.update { it.copy(text = RecordingStore.transcript(audio.parentFile!!)) }

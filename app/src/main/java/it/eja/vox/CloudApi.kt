@@ -37,14 +37,14 @@ class CloudApi(private val prefs: SharedPreferences, private val report: (String
     fun transcribe(audio: File): String = router.run(ApiProfiles.load(prefs, "asr"),
         prefs.getBoolean("free_only", true), report) { p ->
         if (cancelled.get()) throw ApiUnavailable("转写已取消，录音仍保存在本机")
-        if (p.url.startsWith("wss://")) return@run paraformer.transcribe(p, audio)
+        if (p.url.startsWith("wss://")) return@run RecordingStore.requireTranscript(paraformer.transcribe(p, audio))
         val type = when (audio.extension.lowercase()) { "wav" -> "audio/wav"; "m4a" -> "audio/mp4"; else -> "audio/mpeg" }
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("file", audio.name, audio.asRequestBody(type.toMediaType()))
             .addFormDataPart("model", p.model).build()
         val json = request(p, body)
         if (!json.has("text")) throw ApiUnavailable("转写接口未返回 text，保留录音，请检查配置")
-        json.getString("text")
+        RecordingStore.requireTranscript(json.optString("text", ""))
     }
 
     fun chat(prompt: String): String = router.run(ApiProfiles.load(prefs, "llm"),

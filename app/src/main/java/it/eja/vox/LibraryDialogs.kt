@@ -26,6 +26,7 @@ fun HistoryDialog(root: File, busy: Boolean, close: () -> Unit, select: (File) -
     var editing by remember { mutableStateOf<File?>(null) }
     var name by remember { mutableStateOf("") }
     var deleting by remember { mutableStateOf<File?>(null) }
+    var purging by remember { mutableStateOf<List<String>?>(null) }
     var error by remember { mutableStateOf("") }
     val entries by produceState(emptyList<Pair<File, String>>(), revision, bin) {
         value = withContext(Dispatchers.IO) { SessionLibrary.sessions(if (bin) File(root, "trash") else root).map { it to SessionLibrary.title(it) } }
@@ -35,7 +36,10 @@ fun HistoryDialog(root: File, busy: Boolean, close: () -> Unit, select: (File) -
         Column {
             Row { TextButton({ bin = !bin }) { Text(if (bin) "返回历史" else "回收站") } }
             if (error.isNotEmpty()) Text(error)
-            if (bin) Text("回收站保留所有文件，恢复后可继续使用；不会立即释放空间")
+            if (bin) {
+                Text("彻底清除后不可恢复；系统原录音不受影响")
+                TextButton({ purging = entries.map { it.first.name } }, enabled = !busy && entries.isNotEmpty()) { Text("一键清空") }
+            }
             if (entries.isEmpty()) Text("暂无记录")
             LazyColumn(Modifier.heightIn(max = 480.dp)) {
                 items(entries, key = { it.first.name }) { (folder, title) ->
@@ -44,7 +48,10 @@ fun HistoryDialog(root: File, busy: Boolean, close: () -> Unit, select: (File) -
                             Column { Text(title.ifBlank { "未命名录音" }); Text(date(folder.name.toLong()) + " · 待转写 ${RecordingStore.pending(folder).size} 段") }
                         }
                         Row {
-                            if (bin) TextButton({ change { SessionLibrary.restore(root, folder.name) } }, enabled = !busy) { Text("恢复") }
+                            if (bin) {
+                                TextButton({ change { SessionLibrary.restore(root, folder.name) } }, enabled = !busy) { Text("恢复") }
+                                TextButton({ purging = listOf(folder.name) }, enabled = !busy) { Text("彻底清除") }
+                            }
                             else {
                                 TextButton({ name = title; editing = folder }, enabled = !busy) { Text("备注名") }
                                 TextButton({ deleting = folder }, enabled = !busy) { Text("删除") }
@@ -56,6 +63,12 @@ fun HistoryDialog(root: File, busy: Boolean, close: () -> Unit, select: (File) -
             }
         }
     }, confirmButton = { TextButton(close) { Text("关闭") } })
+    purging?.let { ids ->
+        AlertDialog(onDismissRequest = { purging = null }, title = { Text("彻底清除 ${ids.size} 条录音？") },
+            text = { Text("将永久清除柒声回收站中的音频、转写和总结，不可恢复。系统录音机原文件不受影响。") },
+            confirmButton = { TextButton({ if (!busy) change { ids.forEach { SessionLibrary.purge(root, it) } }; purging = null }) { Text("确认清除") } },
+            dismissButton = { TextButton({ purging = null }) { Text("取消") } })
+    }
     editing?.let { folder ->
         AlertDialog(onDismissRequest = { editing = null }, title = { Text("录音备注名") },
             text = { TextField(name, { if (it.length <= 100) name = it }, label = { Text("名称（可留空）") }) },

@@ -2,6 +2,7 @@ package it.eja.vox
 
 object RecordingSummary {
     fun generate(cloud: CloudApi, text: String, language: String): String {
+        RecordingStore.requireTranscript(text)
         val instruction = "总结录音：保留重要事实、数字、决定和待办，不编造。输出语言：${language.ifBlank { "中文" }}。"
         fun request(part: String) = cloud.chat("$instruction\n\n$part")
         var parts = RecordingStore.promptChunks(text)

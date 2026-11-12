@@ -6,6 +6,29 @@ import java.nio.file.Files
 import java.io.File
 
 class LibraryFeaturesTest {
+    @Test fun emptySavedResultsRemainPendingAndNeverBecomeTimestampOnlyTranscript() {
+        val root = Files.createTempDirectory("empty-results").toFile()
+        File(root, "000000.wav").writeBytes(byteArrayOf(1))
+        File(root, "000000.txt").writeText("  \n")
+        assertEquals(1, RecordingStore.pending(root).size)
+        assertEquals("", RecordingStore.transcript(root))
+        assertThrows(ApiUnavailable::class.java) { RecordingStore.requireTranscript(" \n") }
+        RecordingStore.atomicText(File(root, "000000.txt"), "今天开会")
+        assertTrue(RecordingStore.pending(root).isEmpty())
+        assertEquals("[0:00]\n今天开会", RecordingStore.transcript(root))
+    }
+    @Test fun purgeOnlyRemovesSelectedTrashedSessionAndRejectsTraversal() {
+        val root = Files.createTempDirectory("purge-results").toFile()
+        val saved = File(root, "1000").apply { mkdirs() }
+        File(saved, "audio.wav").writeText("audio")
+        val other = File(root, "2000").apply { mkdirs() }
+        SessionLibrary.trash(root, "1000")
+        assertThrows(IllegalArgumentException::class.java) { SessionLibrary.purge(root, "../2000") }
+        SessionLibrary.purge(root, "1000")
+        assertFalse(File(root, "trash/1000").exists())
+        assertTrue(other.isDirectory)
+    }
+
     @Test fun trashAndRestorePreserveAudioTextAndSourceAndHideDuplicateMarker() {
         val root = Files.createTempDirectory("sessions").toFile()
         val session = File(root, "1000").apply { mkdir() }

@@ -148,3 +148,7 @@ To build the project locally:
 4. Build and deploy to your emulator or physical device.
 
 应用图标沿用小肥鱼角色的淡蓝米白水彩画风，加入麦克风；原图与生成说明见 [artwork](artwork/README.md)。Android 8 以上提供自适应图标。
+
+## 0.6.6 修复
+
+空转写不再计为完成，也不会只凭时间戳调用总结；旧版空分段会重新列为待补传。历史和完成页面同时显示转写原文与总结。回收站增加逐条彻底清除和一键清空，确认后永久删除应用内副本，不删除系统原录音；覆盖更新保留 API 配置。

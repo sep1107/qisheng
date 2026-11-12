@@ -136,7 +136,7 @@ class MainActivity : ComponentActivity() {
             selectedSession = folder.name
             transcriptText = RecordingStore.transcript(folder)
             val summary = File(folder, "summary.txt")
-            htmlResponse = wrapHtml(if (summary.exists()) summary.readText() else transcriptText, false)
+            htmlResponse = wrapHtml(if (summary.exists() && transcriptText.isNotBlank()) transcriptText + "\n\n## 总结\n" + summary.readText() else transcriptText, false)
             showHistory = false; showSources = false
         }
         if (showSources) SystemRecordingsDialog(prefs, File(context.filesDir, "recordings"), recording.processing || isUploading,
@@ -152,7 +152,7 @@ class MainActivity : ComponentActivity() {
                 selectedSession = recording.session
                 transcriptText = recording.text
                 htmlResponse = wrapHtml(when {
-                    recording.summary.isNotBlank() -> recording.summary
+                    recording.summary.isNotBlank() -> recording.text + "\n\n## 总结\n" + recording.summary
                     else -> recording.text
                 }, false)
             }

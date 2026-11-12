@@ -17,11 +17,18 @@ object RecordingStore {
 
     fun transcript(session: File): String = segments(session).mapIndexedNotNull { index, audio ->
         val text = File(session, audio.nameWithoutExtension + ".txt")
-        if (!text.exists()) null else "[${index * 2}:00]\n${text.readText()}"
+        if (!hasTranscript(text)) null else "[${index * 2}:00]\n${text.readText()}"
     }.joinToString("\n\n")
 
     fun pending(session: File) = segments(session).filter {
-        !File(session, it.nameWithoutExtension + ".txt").exists()
+        !hasTranscript(File(session, it.nameWithoutExtension + ".txt"))
+    }
+
+    fun hasTranscript(file: File) = file.isFile && file.readText().isNotBlank()
+
+    fun requireTranscript(text: String): String {
+        if (text.isBlank()) throw ApiUnavailable("接口未识别到文字，录音已保留，请补传或检查收音")
+        return text.trim()
     }
 
     fun atomicText(file: File, text: String) {
