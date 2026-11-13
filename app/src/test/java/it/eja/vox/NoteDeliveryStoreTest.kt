@@ -66,4 +66,16 @@ class NoteDeliveryStoreTest {
         listOf(400, 401, 403, 404, 409, 413).forEach { assertFalse(NoteDeliveryStore.retryable(ReceiverHttpError(it))) }
         assertFalse(NoteDeliveryStore.retryable(IllegalStateException("unmatched receipt")))
     }
+
+    @Test fun simultaneousStatusWritersKeepOneCompleteResultWithoutLostStagingFiles() {
+        val session = session()
+        val executor = java.util.concurrent.Executors.newFixedThreadPool(2)
+        try {
+            val futures = (0..1).map { writer -> executor.submit {
+                repeat(12) { NoteDeliveryStore.status(session, "发送状态-$writer-$it") }
+            } }
+            futures.forEach { it.get(10, java.util.concurrent.TimeUnit.SECONDS) }
+            assertTrue(NoteDeliveryStore.status(session) in setOf("发送状态-0-11", "发送状态-1-11"))
+        } finally { executor.shutdownNow() }
+    }
 }

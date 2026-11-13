@@ -7,7 +7,7 @@ import java.io.IOException
 object NoteDeliveryStore {
     private fun folder(session: File) = File(session, "delivery")
     fun status(session: File) = File(folder(session), "status.txt").takeIf { it.isFile }?.readText().orEmpty()
-    fun status(session: File, text: String) {
+    @Synchronized fun status(session: File, text: String) {
         val dir = folder(session).apply { check(isDirectory || mkdirs()) }
         RecordingStore.atomicText(File(dir, "status.txt"), text)
     }
