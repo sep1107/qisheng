@@ -18,6 +18,8 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Test optional Markdown receiver
+        run: python3 -m unittest discover -s receiver -p 'test_*.py' -v
       - uses: android-actions/setup-android@v3
       - run: ./gradlew testDebugUnitTest assembleDebug lintDebug --no-daemon
       # CI's disposable debug signing key is NOT the recorder's update signing key.

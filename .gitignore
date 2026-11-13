@@ -32,3 +32,10 @@ google-services.json
 
 # Android Profiling
 *.hprof
+
+# Optional receiver Python runtime files
+__pycache__/
+*.pyc
+
+# Kotlin compiler session cache
+.kotlin/

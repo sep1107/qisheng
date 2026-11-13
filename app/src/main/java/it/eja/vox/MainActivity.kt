@@ -81,6 +81,7 @@ class MainActivity : ComponentActivity() {
         val recordingState = recording.recording
         var showHistory by remember { mutableStateOf(false) }
         var showSources by remember { mutableStateOf(false) }
+        var showExport by remember { mutableStateOf(false) }
         var showUpdate by remember { mutableStateOf(false) }
         var selectedSession by remember { mutableStateOf("") }
         val beginRecording = {
@@ -182,6 +183,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         val selectedFolder = File(context.filesDir, "recordings/$selectedSession")
+        if (showExport && selectedSession.isNotEmpty()) ExportDialog(selectedFolder) { showExport = false }
         val incompleteImport = selectedSession.isNotEmpty() && File(selectedFolder, "import-incomplete.txt").exists() && !File(selectedFolder, "import-complete.txt").exists()
         val hasPending = selectedSession.isNotEmpty() && (incompleteImport || RecordingStore.pending(selectedFolder).isNotEmpty())
         Scaffold(
@@ -226,6 +228,7 @@ class MainActivity : ComponentActivity() {
                     TextButton({ showUpdate = true }, enabled = !recording.processing && !isUploading) { Text("检查更新") }
                     Row { Checkbox(prefs.getBoolean("live_enabled", true), { prefs.edit().putBoolean("live_enabled", it).apply(); apiRevision++ }, enabled = !recording.processing)
                         Text("实时字幕") }
+                    if (selectedSession.isNotEmpty()) TextButton({ showExport = true }, enabled = !recording.processing && !isUploading) { Text("导出/分享") }
                 }
                 if (recording.liveMessage.isNotBlank()) Text(recording.liveMessage, Modifier.padding(horizontal = 12.dp))
                 if (isUploading) { Text("正在生成 AI 结果，请稍候…", Modifier.padding(horizontal = 12.dp)); LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
