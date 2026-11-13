@@ -5,14 +5,11 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -28,17 +25,27 @@ fun ExportDialog(session: File, close: () -> Unit) {
     var audio by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var message by remember { mutableStateOf("") }
-    var enabled by remember { mutableStateOf(prefs.getBoolean("receiver_enabled", false)) }
-    var kind by remember { mutableStateOf(prefs.getString("receiver_kind", "Mac") ?: "Mac") }
-    var url by remember { mutableStateOf(prefs.getString("receiver_url", "").orEmpty()) }
-    var token by remember { mutableStateOf(prefs.getString("receiver_token", "").orEmpty()) }
+    var failed by remember { mutableStateOf(false) }
+    val enabled = prefs.getBoolean("receiver_enabled", false)
+    val url = prefs.getString("receiver_url", "").orEmpty()
+    val token = prefs.getString("receiver_token", "").orEmpty()
     var confirmSend by remember { mutableStateOf(false) }
-    fun work(action: suspend () -> String) {
-        if (busy || RecordingService.busy) return
-        busy = true; message = "正在处理…"
+    fun work(sending: Boolean = false, action: suspend () -> String) {
+        if (busy) return
+        if (RecordingService.busy) {
+            failed = true; message = "录音或转写仍在处理中，请完成后再试。"
+            return
+        }
+        busy = true; failed = false
+        message = if (sending) "正在发送文字，等待接收端确认…" else "正在保存笔记，请稍候…"
         scope.launch {
             try { message = action() }
-            catch (_: Exception) { message = "操作未完成；原录音与文字仍保留。请检查空间、文件权限、接收地址或网络后重试。" }
+            catch (e: Exception) {
+                failed = true
+                message = (if (sending) "发送未确认，文字仍在本机。" else "保存未完成，原录音与文字仍保留。") +
+                    if (e is IllegalArgumentException || e is IllegalStateException) e.message.orEmpty()
+                    else "请检查网络、接收配置、文件权限或空间后重试。"
+            }
             finally { busy = false }
         }
     }
@@ -63,34 +70,33 @@ fun ExportDialog(session: File, close: () -> Unit) {
             "已保存到新导出目录：Markdown 笔记与纯音频 ZIP 分开存放"
         } } }
     }
-    AlertDialog(onDismissRequest = { if (!busy) close() }, title = { Text("导出与发送") }, text = {
+    AlertDialog(onDismissRequest = { if (!busy) close() }, title = {
+        Column {
+            Text("笔记与发送")
+            if (message.isNotBlank()) {
+                Spacer(Modifier.height(8.dp))
+                Surface(color = if (failed) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                    shape = MaterialTheme.shapes.small, modifier = Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(message, style = MaterialTheme.typography.bodyMedium)
+                        if (busy) { Spacer(Modifier.height(8.dp)); LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                    }
+                }
+            }
+        }
+    }, text = {
         Column(Modifier.verticalScroll(rememberScrollState())) {
-            Text("导出已保存的内容，不重新调用 AI。系统录音导入后的记录也支持。")
+            Text("可直接发送已有原文和总结，无需先保存文件，不重新调用 AI。系统录音导入后的记录也支持。")
             Row { Checkbox(audio, { audio = it }, enabled = !busy); Text("同时导出音频 ZIP（可选，默认不选）") }
             Text("勾选后输出两个独立文件：Markdown 笔记、仅含 WAV 分段的 ZIP。系统原录音保持不变。")
             Row {
                 TextButton({ if (audio) saveWithAudio.launch(null) else saveMarkdown.launch(RecordingExport.filename(session, false)) }, enabled = !busy) { Text("保存笔记") }
             }
             HorizontalDivider()
-            Row { Checkbox(enabled, { enabled = it }, enabled = !busy); Text("可选：发送到自己的 Obsidian 接收端") }
-            if (enabled) {
-                Row { listOf("Mac", "服务器").forEach { option -> TextButton({ kind = option }, enabled = !busy) { Text(if (kind == option) "✓ $option" else option) } } }
-                Text(if (kind == "Mac") "Mac 接收端写入本地库；需 Mac 在线，外网发送需自己的 HTTPS 入口。" else "服务器接收端保存后，还需你自己的同步链路进入 Obsidian；不默认连接 LiveSync。")
-                OutlinedTextField(url, { url = it }, label = { Text("完整 HTTPS 接收地址") }, enabled = !busy, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
-                OutlinedTextField(token, { token = it }, label = { Text("接收令牌（至少24位）") }, enabled = !busy, singleLine = true, visualTransformation = PasswordVisualTransformation())
-            }
-            TextButton({
-                runCatching {
-                    if (enabled) { RecordingExport.receiverUrl(url); require(token.length >= 24 && token.all { it.code in 33..126 }) }
-                    prefs.edit().putBoolean("receiver_enabled", enabled).putString("receiver_kind", kind)
-                        .putString("receiver_url", url.trim()).putString("receiver_token", token.trim()).apply()
-                    message = "接收配置已保存；不会自动发送录音"
-                }.onFailure { message = "请填写有效的 HTTPS 接收地址，以及至少24位的ASCII令牌（不能有空格或换行）" }
-            }, enabled = !busy) { Text("保存接收配置") }
+            Text(if (enabled) "接收地址：$url" else "请先在设置中启用并配置自己的接收端。")
+            Text(if (prefs.getBoolean("receiver_auto_send", false)) "总结完成后自动发送已开启，可在设置中关闭。" else "自动发送未开启，可在设置中选择总结完成后自动发送。")
             TextButton({ confirmSend = true }, enabled = enabled && !busy) { Text("发送文字到 Obsidian 接收端") }
             Text("接收端须兼容柒声协议；这里的发送只含原文与总结，不含音频。")
-            if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-            if (message.isNotBlank()) Text(message)
         }
     }, confirmButton = { TextButton(close, enabled = !busy) { Text("关闭") } })
     if (confirmSend) AlertDialog(onDismissRequest = { confirmSend = false }, title = { Text("发送到你配置的接收端？") },
@@ -98,11 +104,17 @@ fun ExportDialog(session: File, close: () -> Unit) {
         confirmButton = { TextButton({
             confirmSend = false
             val destination = url.trim(); val credential = token.trim()
-            work { withContext(Dispatchers.IO) {
-                var device = prefs.getString("export_device_id", "").orEmpty()
-                if (device.isEmpty()) { device = UUID.randomUUID().toString(); prefs.edit().putString("export_device_id", device).commit() }
-                runCatching { NoteReceiver.send(destination, credential, "$device-${session.name}", SessionLibrary.title(session).ifBlank { "柒声录音" }, RecordingExport.markdown(session)) }
-                    .getOrElse { "发送未确认，内容仍在本机。${if (it is IllegalArgumentException || it is IllegalStateException) it.message.orEmpty() else "请检查网络后重试"}" }
+            work(sending = true) { withContext(Dispatchers.IO) {
+                val device = NoteDelivery.deviceId(prefs)
+                val id = "$device-${session.name}"
+                val markdown = RecordingExport.markdown(session)
+                val result = NoteReceiver.send(destination, credential, id, SessionLibrary.title(session).ifBlank { "柒声录音" }, markdown)
+                runCatching {
+                    if (NoteDeliveryStore.ready(session) && NoteDeliveryStore.read(session, "id") == id &&
+                        NoteDeliveryStore.read(session, "destination") == RecordingExport.receiverUrl(destination) &&
+                        NoteDeliveryStore.read(session, "markdown") == markdown) NoteDeliveryStore.accept(session, result)
+                }
+                result
             } }
         }) { Text("发送") } }, dismissButton = { TextButton({ confirmSend = false }) { Text("取消") } })
 }

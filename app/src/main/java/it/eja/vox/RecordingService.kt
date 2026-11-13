@@ -119,14 +119,17 @@ class RecordingService : Service() {
                     val captureError = File(folder, "capture-error.txt").exists()
                     var summary = RecordingStore.savedSummary(folder)
                     var summaryFailed = false
+                    var summaryCreated = false
                     if (importing && intent?.getBooleanExtra("autoSummary", false) == true && pending == 0 && !captureError) {
                         RecordingState.update { it.copy(message = "转写完成，正在生成总结", phase = "生成总结", uploadPercent = -1) }
                         try {
                             summary = RecordingSummary.generate(cloud, RecordingStore.transcript(folder), getSharedPreferences("vox_prefs", MODE_PRIVATE).getString("language", "中文") ?: "中文")
                             RecordingStore.atomicText(File(folder, "summary.txt"), summary)
+                            summaryCreated = true
                         } catch (_: Exception) { summaryFailed = true }
                     }
                     busy = false
+                    if (summaryCreated) NoteDelivery.queue(this, folder)
                     RecordingState.update { it.copy(processing = false, text = RecordingStore.transcript(folder), summary = summary,
 
                         message = when {

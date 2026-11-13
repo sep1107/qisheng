@@ -18,9 +18,7 @@ object NoteReceiver {
         val request = Request.Builder().url(RecordingExport.receiverUrl(url)).header("Authorization", "Bearer $token")
             .post(body.toRequestBody("application/json; charset=utf-8".toMediaType())).build()
         client.newCall(request).execute().use { response ->
-            check(response.code in listOf(200, 201, 202)) {
-                if (response.code == 409) "接收端已有同一录音的不同内容，未覆盖，请到接收端核对" else "接收失败（HTTP ${response.code}），录音和文字仍保存在本机"
-            }
+            if (response.code !in listOf(200, 201, 202)) throw ReceiverHttpError(response.code)
             val bytes = response.body?.byteStream()?.use { input ->
                 val result = java.io.ByteArrayOutputStream()
                 val buffer = ByteArray(4096)

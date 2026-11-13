@@ -8,6 +8,9 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
 object RecordingExport {
+    fun display(transcript: String, summary: String): String =
+        if (summary.isBlank()) transcript else "## AI 总结\n\n$summary\n\n## 转写原文\n\n$transcript"
+
     fun filename(session: File, audio: Boolean): String {
         val title = SessionLibrary.title(session).ifBlank { "柒声录音-${session.name}" }
             .replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").take(80).trim().trimStart('.').ifBlank { "柒声录音" }

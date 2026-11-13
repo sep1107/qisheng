@@ -34,6 +34,11 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.io.*
 import kotlin.concurrent.thread
 import org.commonmark.parser.Parser
@@ -48,6 +53,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        thread(name = "qisheng-resume-delivery") { runCatching { NoteDelivery.resume(applicationContext) } }
         val sharedUri = if (intent?.action == Intent.ACTION_SEND) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
@@ -84,6 +90,18 @@ class MainActivity : ComponentActivity() {
         var showExport by remember { mutableStateOf(false) }
         var showUpdate by remember { mutableStateOf(false) }
         var selectedSession by remember { mutableStateOf("") }
+        var deliveryMessage by remember { mutableStateOf("") }
+        LaunchedEffect(selectedSession) {
+            deliveryMessage = ""
+            if (selectedSession.isNotEmpty()) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    deliveryMessage = withContext(Dispatchers.IO) {
+                        runCatching { NoteDeliveryStore.status(File(context.filesDir, "recordings/$selectedSession")) }.getOrDefault("")
+                    }
+                    delay(1000)
+                }
+            }
+        }
         val beginRecording = {
             ContextCompat.startForegroundService(context,
                 Intent(context, RecordingService::class.java).setAction(RecordingService.START))
@@ -139,7 +157,7 @@ class MainActivity : ComponentActivity() {
             selectedSession = folder.name
             transcriptText = RecordingStore.transcript(folder)
             savedSummary = RecordingStore.savedSummary(folder)
-            htmlResponse = wrapHtml(savedSummary.ifBlank { transcriptText }, false)
+            htmlResponse = wrapHtml(RecordingExport.display(transcriptText, savedSummary), false)
             showHistory = false; showSources = false
         }
         if (showSources) SystemRecordingsDialog(prefs, File(context.filesDir, "recordings"), recording.processing || isUploading,
@@ -154,10 +172,7 @@ class MainActivity : ComponentActivity() {
                 selectedSession = recording.session
                 transcriptText = recording.text
                 savedSummary = recording.summary.ifBlank { RecordingStore.savedSummary(File(context.filesDir, "recordings/${recording.session}")) }
-                htmlResponse = wrapHtml(when {
-                    savedSummary.isNotBlank() -> savedSummary
-                    else -> recording.text
-                }, false)
+                htmlResponse = wrapHtml(RecordingExport.display(recording.text, savedSummary), false)
             }
         }
         if (showHistory) HistoryDialog(File(context.filesDir, "recordings"), recording.processing || isUploading,
@@ -173,8 +188,10 @@ class MainActivity : ComponentActivity() {
             val text = transcriptText
             thread {
                 try {
+                    val hadSummary = RecordingStore.savedSummary(folder).isNotBlank()
                     val result = RecordingStore.summary(folder, refresh) { RecordingSummary.generate(cloud, text, language) }
-                    runOnUiThread { savedSummary = result; htmlResponse = wrapHtml(result, false); isUploading = false
+                    if (refresh || !hadSummary) NoteDelivery.queue(context, folder)
+                    runOnUiThread { savedSummary = result; htmlResponse = wrapHtml(RecordingExport.display(transcriptText, result), false); isUploading = false
                         RecordingState.update { it.copy(message = "总结已保存，查看不会再次消耗额度") } }
                 } catch (_: Exception) {
                     runOnUiThread { isUploading = false; htmlResponse = wrapHtml("总结失败，原文及已有总结仍保留，可稍后重试", true) }
@@ -223,9 +240,6 @@ class MainActivity : ComponentActivity() {
             }
         ) { padding ->
             Column(modifier = Modifier.padding(padding)) {
-                Row {
-                    if (selectedSession.isNotEmpty()) TextButton({ showExport = true }, enabled = !recording.processing && !isUploading) { Text("保存笔记") }
-                }
                 if (recording.liveMessage.isNotBlank()) Text(recording.liveMessage, Modifier.padding(horizontal = 12.dp))
                 if (isUploading) { Text("正在生成 AI 结果，请稍候…", Modifier.padding(horizontal = 12.dp)); LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
                 if (recording.processing && !recording.recording) {
@@ -235,6 +249,7 @@ class MainActivity : ComponentActivity() {
                 }
                 Text("${recording.seconds / 60}:${(recording.seconds % 60).toString().padStart(2, '0')} · ${recording.message}",
                     modifier = Modifier.padding(horizontal = 12.dp))
+                if (deliveryMessage.isNotBlank()) Text(deliveryMessage, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodyMedium)
                 if (hasPending && !recording.processing && !isUploading) {
                     if (hasPending) Text("还有录音分段未转写，补传完成后才能总结。", Modifier.padding(horizontal = 12.dp))
                     if (incompleteImport) Text("导入未完成，请重新导入原文件；当前部分不可总结。")
@@ -244,9 +259,8 @@ class MainActivity : ComponentActivity() {
                     }) { Icon(Icons.Default.Refresh, null); Text("补传未完成分段") }
                 }
 
-                if (savedSummary.isNotBlank() && !recording.processing && !isUploading) Row {
-                    TextButton({ htmlResponse = wrapHtml(transcriptText, false) }) { Text("查看原文") }
-                    TextButton({ htmlResponse = wrapHtml(savedSummary, false) }) { Text("查看总结（已保存）") }
+                if (selectedSession.isNotEmpty() && !recording.processing && !isUploading) {
+                    TextButton({ showExport = true }) { Text("保存笔记") }
                 }
                 if (recordingState && recording.liveText.isNotBlank()) {
                     val liveScroll = rememberScrollState()

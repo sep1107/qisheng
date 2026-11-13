@@ -7,6 +7,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 
@@ -53,6 +54,7 @@ class PreferenceQuota(private val prefs: SharedPreferences) : ApiQuota {
 
 @Composable
 fun ApiSettingsDialog(prefs: SharedPreferences, checkUpdate: () -> Unit, dismiss: () -> Unit, saved: () -> Unit) {
+    val context = LocalContext.current
     var kind by remember { mutableStateOf("asr") }
     var index by remember { mutableStateOf(0) }
     var asr by remember { mutableStateOf(ApiProfiles.load(prefs, "asr")) }
@@ -60,16 +62,32 @@ fun ApiSettingsDialog(prefs: SharedPreferences, checkUpdate: () -> Unit, dismiss
     var freeOnly by remember { mutableStateOf(prefs.getBoolean("free_only", true)) }
     var language by remember { mutableStateOf(prefs.getString("language", "中文") ?: "中文") }
     var liveEnabled by remember { mutableStateOf(prefs.getBoolean("live_enabled", true)) }
+    var receiverEnabled by remember { mutableStateOf(prefs.getBoolean("receiver_enabled", false)) }
+    var autoSend by remember { mutableStateOf(prefs.getBoolean("receiver_auto_send", false)) }
+    var receiverKind by remember { mutableStateOf(prefs.getString("receiver_kind", "Mac").orEmpty()) }
+    var receiverUrl by remember { mutableStateOf(prefs.getString("receiver_url", "").orEmpty()) }
+    var receiverToken by remember { mutableStateOf(prefs.getString("receiver_token", "").orEmpty()) }
+    var receiverError by remember { mutableStateOf("") }
     val profile = (if (kind == "asr") asr else llm)[index]
     fun update(value: ApiProfile) {
         if (kind == "asr") asr = asr.toMutableList().apply { set(index, value) }
         else llm = llm.toMutableList().apply { set(index, value) }
     }
-    AlertDialog(onDismissRequest = dismiss, title = { Text("设置") }, text = {
+    AlertDialog(onDismissRequest = dismiss, title = { Column { Text("设置"); if (receiverError.isNotBlank()) Text(receiverError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) } }, text = {
         Column(Modifier.verticalScroll(rememberScrollState())) {
             Row { Checkbox(liveEnabled, { liveEnabled = it }); Text("实时字幕") }
             Text("默认开启，完整文字以分段转写为准。")
             TextButton(checkUpdate) { Text("检查更新") }
+            HorizontalDivider()
+            Text("笔记接收端")
+            Row { Checkbox(receiverEnabled, { receiverEnabled = it; if (!it) autoSend = false }); Text("启用自己的 Obsidian 接收端") }
+            if (receiverEnabled) {
+                Row { listOf("Mac", "服务器").forEach { option -> TextButton({ receiverKind = option }) { Text(if (receiverKind == option) "✓ $option" else option) } } }
+                OutlinedTextField(receiverUrl, { receiverUrl = it }, label = { Text("完整 HTTPS 接收地址") }, singleLine = true)
+                OutlinedTextField(receiverToken, { receiverToken = it }, label = { Text("接收令牌（至少24位）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                Row { Checkbox(autoSend, { autoSend = it }); Text("总结完成后自动发送") }
+                Text("原文和总结一起发送，不自动生成总结、不发送音频、不追溯旧总结。断网后台重试，不阻塞录音；已发送版本不自动覆盖。")
+            }
             HorizontalDivider()
             Text("接口与免费额度")
             Text("按 1→2→3 顺序尝试，仅启用的接口会接收音频/文字。免费额度和价格须在服务商控制台确认。")
@@ -100,8 +118,20 @@ fun ApiSettingsDialog(prefs: SharedPreferences, checkUpdate: () -> Unit, dismiss
             Text("没有可用免费接口时只保存录音，不自动启用付费接口。超时切换可能产生重复计费；请同时在服务商关闭自动充值或设消费上限。")
         }
     }, confirmButton = { TextButton({
-        ApiProfiles.save(prefs, asr + llm)
-        prefs.edit().putBoolean("free_only", freeOnly).putString("language", language).putBoolean("live_enabled", liveEnabled).apply()
-        saved()
+        runCatching {
+            if (receiverEnabled) {
+                RecordingExport.receiverUrl(receiverUrl)
+                require(receiverToken.trim().length >= 24 && receiverToken.trim().all { it.code in 33..126 }) { "接收令牌至少24位，不能包含空格或换行" }
+            }
+            val resetSince = autoSend && (!prefs.getBoolean("receiver_auto_send", false) || prefs.getString("receiver_url", "") != receiverUrl.trim())
+            ApiProfiles.save(prefs, asr + llm)
+            val edit = prefs.edit().putBoolean("free_only", freeOnly).putString("language", language).putBoolean("live_enabled", liveEnabled)
+                .putBoolean("receiver_enabled", receiverEnabled).putBoolean("receiver_auto_send", autoSend && receiverEnabled)
+                .putString("receiver_kind", receiverKind).putString("receiver_url", receiverUrl.trim()).putString("receiver_token", receiverToken.trim())
+            if (resetSince) edit.putLong("receiver_auto_since", System.currentTimeMillis())
+            check(edit.commit()) { "设置保存失败，请检查存储空间" }
+            NoteDelivery.resume(context)
+            saved()
+        }.onFailure { receiverError = it.message ?: "接收配置无效，请检查后重试" }
     }) { Text("保存") } }, dismissButton = { TextButton(dismiss) { Text("取消") } })
 }
