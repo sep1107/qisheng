@@ -147,7 +147,6 @@ class MainActivity : ComponentActivity() {
             chooseFile = { showSources = false; importLauncher.launch(arrayOf("audio/*")) },
             close = { showSources = false }, import = { source, auto -> showSources = false; importAudio(Uri.parse(source.uri), source, auto) },
             open = { selectSession(it) })
-        if (showUpdate) UpdateDialog(close = { showUpdate = false })
         LaunchedEffect(sharedUri) { sharedUri?.let { importAudio(it) } }
 
         LaunchedEffect(recording.text, recording.session, recording.recording, recording.summary) {
@@ -225,10 +224,7 @@ class MainActivity : ComponentActivity() {
         ) { padding ->
             Column(modifier = Modifier.padding(padding)) {
                 Row {
-                    TextButton({ showUpdate = true }, enabled = !recording.processing && !isUploading) { Text("检查更新") }
-                    Row { Checkbox(prefs.getBoolean("live_enabled", true), { prefs.edit().putBoolean("live_enabled", it).apply(); apiRevision++ }, enabled = !recording.processing)
-                        Text("实时字幕") }
-                    if (selectedSession.isNotEmpty()) TextButton({ showExport = true }, enabled = !recording.processing && !isUploading) { Text("导出/分享") }
+                    if (selectedSession.isNotEmpty()) TextButton({ showExport = true }, enabled = !recording.processing && !isUploading) { Text("保存笔记") }
                 }
                 if (recording.liveMessage.isNotBlank()) Text(recording.liveMessage, Modifier.padding(horizontal = 12.dp))
                 if (isUploading) { Text("正在生成 AI 结果，请稍候…", Modifier.padding(horizontal = 12.dp)); LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
@@ -366,12 +362,13 @@ class MainActivity : ComponentActivity() {
         }
 
         if (showSettings) {
-            ApiSettingsDialog(prefs, dismiss = { showSettings = false }, saved = {
+            ApiSettingsDialog(prefs, checkUpdate = { showUpdate = true }, dismiss = { showSettings = false }, saved = {
                 apiRevision++
                 language = prefs.getString("language", "中文") ?: "中文"
                 showSettings = false
             })
         }
+        if (showUpdate) UpdateDialog(close = { showUpdate = false })
     }
 
     private fun callLLM(prompt: String, onResult: (String) -> Unit) {

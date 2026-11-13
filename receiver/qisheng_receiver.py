@@ -3,16 +3,11 @@ import hashlib
 import hmac
 import json
 import os
-import re
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-MAX_BODY = 4 * 1024 * 1024
-
-
-class NoteConflict(Exception):
-    pass
+from note_protocol import MAX_BODY, NoteConflict, validate_note
 
 
 class Store:
@@ -27,17 +22,8 @@ class Store:
         self.database.chmod(0o600)
 
     def save(self, data):
-        if not isinstance(data, dict) or data.get("schema") != 1:
-            raise ValueError()
-        ident, title, text, digest = (data.get(k) for k in ("id", "title", "markdown", "sha256"))
-        if not all(isinstance(v, str) for v in (ident, title, text, digest)):
-            raise ValueError()
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", ident) or not re.fullmatch(r"[a-f0-9]{64}", digest) or not text.strip() or len(title) > 200:
-            raise ValueError()
+        ident, title, text, digest = validate_note(data)
         body = text.encode("utf-8")
-        if len(body) > MAX_BODY or not hmac.compare_digest(hashlib.sha256(body).hexdigest(), digest):
-            raise ValueError()
-        title = re.sub(r'[\\/:*?"<>|\x00-\x1f\x7f]', "_", title).strip(" .")[:60] or "柒声录音"
         with sqlite3.connect(self.database, timeout=10) as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT sha, filename FROM notes WHERE id=?", (ident,)).fetchone()
@@ -105,7 +91,7 @@ def handler(store, token):
                 if len(body) != size:
                     raise ValueError()
                 result = store.save(json.loads(body))
-                self.reply(201 if result["status"] == "saved" else 200, result)
+                self.reply({"saved": 201, "duplicate": 200, "queued": 202}[result["status"]], result)
             except (ValueError, UnicodeError):
                 self.reply(400, {"error": "invalid_note"})
             except NoteConflict:
@@ -122,9 +108,15 @@ def main():
         raise SystemExit("Set QISHENG_TOKEN_FILE or QISHENG_TOKEN (at least 24 non-whitespace characters).")
     inbox = os.environ.get("QISHENG_INBOX")
     state = os.environ.get("QISHENG_STATE")
-    if not inbox or not state:
+    backup = os.environ.get("QISHENG_DELIVERY_BACKUP")
+    if not state or (not inbox and not backup):
         raise SystemExit("Set QISHENG_INBOX and QISHENG_STATE; keep state outside your Obsidian Vault.")
-    server = ThreadingHTTPServer((os.environ.get("QISHENG_BIND", "127.0.0.1"), int(os.environ.get("QISHENG_PORT", "8769"))), handler(Store(inbox, state), token))
+    if backup:
+        from delivery_queue import QueueStore
+        store = QueueStore(state, backup)
+    else:
+        store = Store(inbox, state)
+    server = ThreadingHTTPServer((os.environ.get("QISHENG_BIND", "127.0.0.1"), int(os.environ.get("QISHENG_PORT", "8769"))), handler(store, token))
     print("QiSheng receiver ready; only /v1/notes accepts authenticated Markdown.", flush=True)
     try:
         server.serve_forever()

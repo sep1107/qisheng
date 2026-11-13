@@ -52,20 +52,26 @@ class PreferenceQuota(private val prefs: SharedPreferences) : ApiQuota {
 }
 
 @Composable
-fun ApiSettingsDialog(prefs: SharedPreferences, dismiss: () -> Unit, saved: () -> Unit) {
+fun ApiSettingsDialog(prefs: SharedPreferences, checkUpdate: () -> Unit, dismiss: () -> Unit, saved: () -> Unit) {
     var kind by remember { mutableStateOf("asr") }
     var index by remember { mutableStateOf(0) }
     var asr by remember { mutableStateOf(ApiProfiles.load(prefs, "asr")) }
     var llm by remember { mutableStateOf(ApiProfiles.load(prefs, "llm")) }
     var freeOnly by remember { mutableStateOf(prefs.getBoolean("free_only", true)) }
     var language by remember { mutableStateOf(prefs.getString("language", "中文") ?: "中文") }
+    var liveEnabled by remember { mutableStateOf(prefs.getBoolean("live_enabled", true)) }
     val profile = (if (kind == "asr") asr else llm)[index]
     fun update(value: ApiProfile) {
         if (kind == "asr") asr = asr.toMutableList().apply { set(index, value) }
         else llm = llm.toMutableList().apply { set(index, value) }
     }
-    AlertDialog(onDismissRequest = dismiss, title = { Text("接口与免费额度") }, text = {
+    AlertDialog(onDismissRequest = dismiss, title = { Text("设置") }, text = {
         Column(Modifier.verticalScroll(rememberScrollState())) {
+            Row { Checkbox(liveEnabled, { liveEnabled = it }); Text("实时字幕") }
+            Text("默认开启，完整文字以分段转写为准。")
+            TextButton(checkUpdate) { Text("检查更新") }
+            HorizontalDivider()
+            Text("接口与免费额度")
             Text("按 1→2→3 顺序尝试，仅启用的接口会接收音频/文字。免费额度和价格须在服务商控制台确认。")
             Row { Checkbox(freeOnly, { freeOnly = it }); Text("仅使用我确认仍有免费额度的接口") }
             Row {
@@ -95,7 +101,7 @@ fun ApiSettingsDialog(prefs: SharedPreferences, dismiss: () -> Unit, saved: () -
         }
     }, confirmButton = { TextButton({
         ApiProfiles.save(prefs, asr + llm)
-        prefs.edit().putBoolean("free_only", freeOnly).putString("language", language).apply()
+        prefs.edit().putBoolean("free_only", freeOnly).putString("language", language).putBoolean("live_enabled", liveEnabled).apply()
         saved()
     }) { Text("保存") } }, dismissButton = { TextButton(dismiss) { Text("取消") } })
 }
