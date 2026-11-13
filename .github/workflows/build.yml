@@ -21,6 +21,8 @@ jobs:
       - name: Test optional Markdown receiver
         run: python3 -m unittest discover -s receiver -p 'test_*.py' -v
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
       - run: ./gradlew testDebugUnitTest assembleDebug lintDebug --no-daemon
       # CI's disposable debug signing key is NOT the recorder's update signing key.
       # Publish an APK only after signing with the original installation key.
