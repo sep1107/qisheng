@@ -2,6 +2,7 @@ package it.eja.vox
 
 import android.content.SharedPreferences
 import okhttp3.*
+import okio.buffer
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.asRequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -34,13 +35,32 @@ class CloudApi(private val prefs: SharedPreferences, private val report: (String
         }
     }
 
-    fun transcribe(audio: File): String = router.run(ApiProfiles.load(prefs, "asr"),
+    fun transcribe(audio: File, progress: (Int) -> Unit = {}): String = router.run(ApiProfiles.load(prefs, "asr"),
         prefs.getBoolean("free_only", true), report) { p ->
         if (cancelled.get()) throw ApiUnavailable("转写已取消，录音仍保存在本机")
-        if (p.url.startsWith("wss://")) return@run RecordingStore.requireTranscript(paraformer.transcribe(p, audio))
+        if (p.url.startsWith("wss://")) return@run RecordingStore.requireTranscript(paraformer.transcribe(p, audio, progress))
         val type = when (audio.extension.lowercase()) { "wav" -> "audio/wav"; "m4a" -> "audio/mp4"; else -> "audio/mpeg" }
+        val fileBody = audio.asRequestBody(type.toMediaType())
+        val trackedBody = object : RequestBody() {
+            override fun contentType() = fileBody.contentType()
+            override fun contentLength() = fileBody.contentLength()
+            override fun writeTo(sink: okio.BufferedSink) {
+                var sent = 0L
+                var previous = -1
+                val counter = object : okio.ForwardingSink(sink) {
+                    override fun write(source: okio.Buffer, byteCount: Long) {
+                        super.write(source, byteCount); sent += byteCount
+                        val percent = (sent * 100 / audio.length().coerceAtLeast(1)).toInt().coerceAtMost(100)
+                        if (percent != previous) { previous = percent; progress(percent) }
+                    }
+                }
+                val buffered = counter.buffer()
+                fileBody.writeTo(buffered); buffered.flush()
+            }
+        }
+        progress(0)
         val body = MultipartBody.Builder().setType(MultipartBody.FORM)
-            .addFormDataPart("file", audio.name, audio.asRequestBody(type.toMediaType()))
+            .addFormDataPart("file", audio.name, trackedBody)
             .addFormDataPart("model", p.model).build()
         val json = request(p, body)
         if (!json.has("text")) throw ApiUnavailable("转写接口未返回 text，保留录音，请检查配置")

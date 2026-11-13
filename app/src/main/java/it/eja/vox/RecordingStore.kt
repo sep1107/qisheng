@@ -31,6 +31,15 @@ object RecordingStore {
         return text.trim()
     }
 
+    fun savedSummary(session: File): String = File(session, "summary.txt").takeIf { it.isFile }?.readText().orEmpty()
+
+    fun summary(session: File, refresh: Boolean = false, generate: () -> String): String {
+        if (!refresh) savedSummary(session).takeIf { it.isNotBlank() }?.let { return it }
+        val result = requireTranscript(generate())
+        atomicText(File(session, "summary.txt"), result)
+        return result
+    }
+
     fun atomicText(file: File, text: String) {
         val staging = File(file.parentFile, file.name + ".writing")
         staging.outputStream().use { stream ->

@@ -89,6 +89,8 @@ class MainActivity : ComponentActivity() {
         }
         var isUploading by remember { mutableStateOf(false) }
         var htmlResponse by remember { mutableStateOf(wrapHtml("选择系统录音，或点击麦克风开始录音", false)) }
+        var savedSummary by remember { mutableStateOf("") }
+        var showRegenerate by remember { mutableStateOf(false) }
         var transcriptText by remember { mutableStateOf("") }
         var showSettings by remember { mutableStateOf(false) }
         var showActionMenu by remember { mutableStateOf(false) }
@@ -135,8 +137,8 @@ class MainActivity : ComponentActivity() {
             RecordingStore.recover(folder)
             selectedSession = folder.name
             transcriptText = RecordingStore.transcript(folder)
-            val summary = File(folder, "summary.txt")
-            htmlResponse = wrapHtml(if (summary.exists() && transcriptText.isNotBlank()) transcriptText + "\n\n## 总结\n" + summary.readText() else transcriptText, false)
+            savedSummary = RecordingStore.savedSummary(folder)
+            htmlResponse = wrapHtml(savedSummary.ifBlank { transcriptText }, false)
             showHistory = false; showSources = false
         }
         if (showSources) SystemRecordingsDialog(prefs, File(context.filesDir, "recordings"), recording.processing || isUploading,
@@ -151,18 +153,34 @@ class MainActivity : ComponentActivity() {
             if (recording.session.isNotEmpty()) {
                 selectedSession = recording.session
                 transcriptText = recording.text
+                savedSummary = recording.summary.ifBlank { RecordingStore.savedSummary(File(context.filesDir, "recordings/${recording.session}")) }
                 htmlResponse = wrapHtml(when {
-                    recording.summary.isNotBlank() -> recording.text + "\n\n## 总结\n" + recording.summary
+                    savedSummary.isNotBlank() -> savedSummary
                     else -> recording.text
                 }, false)
             }
         }
         if (showHistory) HistoryDialog(File(context.filesDir, "recordings"), recording.processing || isUploading,
             close = { showHistory = false }, select = { selectSession(it) }, trashed = { id ->
-                if (selectedSession == id) { selectedSession = ""; transcriptText = ""; htmlResponse = wrapHtml("已移入回收站，可在历史中恢复", false) }
+                if (selectedSession == id) { selectedSession = ""; transcriptText = ""; savedSummary = ""; htmlResponse = wrapHtml("已移入回收站，可在历史中恢复", false) }
                 RecordingState.update { if (it.session == id) RecordingStatus() else it }
             })
 
+        fun generateSummary(refresh: Boolean) {
+            if (isUploading || recording.processing || transcriptText.isBlank()) return
+            val folder = selectedSession.takeIf { it.isNotEmpty() }?.let { File(context.filesDir, "recordings/$it") } ?: return
+            isUploading = true
+            val text = transcriptText
+            thread {
+                try {
+                    val result = RecordingStore.summary(folder, refresh) { RecordingSummary.generate(cloud, text, language) }
+                    runOnUiThread { savedSummary = result; htmlResponse = wrapHtml(result, false); isUploading = false
+                        RecordingState.update { it.copy(message = "总结已保存，查看不会再次消耗额度") } }
+                } catch (_: Exception) {
+                    runOnUiThread { isUploading = false; htmlResponse = wrapHtml("总结失败，原文及已有总结仍保留，可稍后重试", true) }
+                }
+            }
+        }
         val selectedFolder = File(context.filesDir, "recordings/$selectedSession")
         val incompleteImport = selectedSession.isNotEmpty() && File(selectedFolder, "import-incomplete.txt").exists() && !File(selectedFolder, "import-complete.txt").exists()
         val hasPending = selectedSession.isNotEmpty() && (incompleteImport || RecordingStore.pending(selectedFolder).isNotEmpty())
@@ -210,10 +228,15 @@ class MainActivity : ComponentActivity() {
                         Text("实时字幕") }
                 }
                 if (recording.liveMessage.isNotBlank()) Text(recording.liveMessage, Modifier.padding(horizontal = 12.dp))
-                if (isUploading) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                if (isUploading) { Text("正在生成 AI 结果，请稍候…", Modifier.padding(horizontal = 12.dp)); LinearProgressIndicator(modifier = Modifier.fillMaxWidth()) }
+                if (recording.processing && !recording.recording) {
+                    Text(if (recording.totalSegments > 0) "已完成 ${recording.completedSegments}/${recording.totalSegments} 段 · 第 ${recording.currentSegment} 段 · ${recording.phase}" else "正在准备录音分段…", Modifier.padding(horizontal = 12.dp))
+                    if (recording.uploadPercent >= 0) LinearProgressIndicator(progress = { recording.uploadPercent / 100f }, modifier = Modifier.fillMaxWidth())
+                    else LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                }
                 Text("${recording.seconds / 60}:${(recording.seconds % 60).toString().padStart(2, '0')} · ${recording.message}",
                     modifier = Modifier.padding(horizontal = 12.dp))
-                if (selectedSession.isNotEmpty() && !recording.processing) {
+                if (hasPending && !recording.processing && !isUploading) {
                     if (hasPending) Text("还有录音分段未转写，补传完成后才能总结。", Modifier.padding(horizontal = 12.dp))
                     if (incompleteImport) Text("导入未完成，请重新导入原文件；当前部分不可总结。")
                     TextButton(enabled = !incompleteImport, onClick = {
@@ -222,6 +245,10 @@ class MainActivity : ComponentActivity() {
                     }) { Icon(Icons.Default.Refresh, null); Text("补传未完成分段") }
                 }
 
+                if (savedSummary.isNotBlank() && !recording.processing && !isUploading) Row {
+                    TextButton({ htmlResponse = wrapHtml(transcriptText, false) }) { Text("查看原文") }
+                    TextButton({ htmlResponse = wrapHtml(savedSummary, false) }) { Text("查看总结（已保存）") }
+                }
                 if (recordingState && recording.liveText.isNotBlank()) {
                     val liveScroll = rememberScrollState()
                     LaunchedEffect(recording.liveText) {
@@ -248,6 +275,10 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        if (showRegenerate) AlertDialog(onDismissRequest = { showRegenerate = false },
+            title = { Text("重新生成总结？") }, text = { Text("将再次调用 AI 接口并消耗额度；成功后替换已保存总结。") },
+            confirmButton = { TextButton({ showRegenerate = false; generateSummary(true) }) { Text("重新生成") } },
+            dismissButton = { TextButton({ showRegenerate = false }) { Text("取消") } })
         if (showActionMenu) {
             AlertDialog(
                 onDismissRequest = { showActionMenu = false },
@@ -255,17 +286,17 @@ class MainActivity : ComponentActivity() {
                 text = {
                     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                         ListItem(
-                            headlineContent = { Text("总结") },
+                            headlineContent = { Text(if (savedSummary.isBlank()) "生成总结" else "查看已保存总结（不调用 API）") },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             modifier = Modifier.clickable {
                                 showActionMenu = false
-                                isUploading = true
-                                val folder = selectedSession.takeIf { it.isNotEmpty() }?.let { File(context.filesDir, "recordings/$it") }
-                                summarize(transcriptText, language) { result, success ->
-                                    if (success && folder != null) RecordingStore.atomicText(File(folder, "summary.txt"), result)
-                                    runOnUiThread { htmlResponse = wrapHtml(result, !success); isUploading = false }
-                                }
+                                if (savedSummary.isNotBlank()) htmlResponse = wrapHtml(savedSummary, false)
+                                else generateSummary(false)
                             }
+                        )
+                        if (savedSummary.isNotBlank()) ListItem(
+                            headlineContent = { Text("重新生成总结（消耗额度）") },
+                            modifier = Modifier.clickable { showActionMenu = false; showRegenerate = true }
                         )
                         ListItem(
                             headlineContent = { Text("翻译") },
@@ -344,16 +375,6 @@ class MainActivity : ComponentActivity() {
         thread {
             try { onResult(wrapHtml(cloud.chat(prompt), false)) }
             catch (e: Exception) { onResult(wrapHtml(if (e is ApiUnavailable) e.message ?: "接口不可用" else "总结失败，请重试", true)) }
-        }
-    }
-
-    private fun summarize(text: String, language: String, result: (String, Boolean) -> Unit) {
-        thread {
-            try {
-                result(RecordingSummary.generate(cloud, text, language), true)
-            } catch (e: Exception) {
-                result(if (e is ApiUnavailable) e.message ?: "接口不可用" else "总结失败，原录音和转写仍保留，请重试。", false)
-            }
         }
     }
 

@@ -6,6 +6,27 @@ import java.nio.file.Files
 import java.io.File
 
 class LibraryFeaturesTest {
+    @Test fun savedSummaryIsReusedUntilExplicitRegeneration() {
+        val root = Files.createTempDirectory("summary-cache").toFile()
+        var calls = 0
+        fun generate(): String { calls++; return "第${calls}次总结" }
+        assertEquals("第1次总结", RecordingStore.summary(root, generate = ::generate))
+        assertEquals("第1次总结", RecordingStore.summary(root, generate = ::generate))
+        assertEquals(1, calls)
+        assertEquals("第2次总结", RecordingStore.summary(root, true, ::generate))
+        assertEquals("第2次总结", RecordingStore.savedSummary(root))
+        assertEquals(2, calls)
+    }
+    @Test fun failedSummaryRefreshPreservesSavedResultAndBlankCacheDoesNotCount() {
+        val root = Files.createTempDirectory("summary-failure").toFile()
+        File(root, "summary.txt").writeText(" ")
+        assertEquals("已有总结", RecordingStore.summary(root) { "已有总结" })
+        assertThrows(IllegalStateException::class.java) {
+            RecordingStore.summary(root, true) { error("network failed") }
+        }
+        assertEquals("已有总结", RecordingStore.savedSummary(root))
+    }
+
     @Test fun emptySavedResultsRemainPendingAndNeverBecomeTimestampOnlyTranscript() {
         val root = Files.createTempDirectory("empty-results").toFile()
         File(root, "000000.wav").writeBytes(byteArrayOf(1))

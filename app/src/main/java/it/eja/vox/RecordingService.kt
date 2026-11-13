@@ -19,6 +19,8 @@ data class RecordingStatus(
     val session: String = "", val recording: Boolean = false,
     val processing: Boolean = false, val seconds: Long = 0,
     val text: String = "", val message: String = "准备就绪",
+    val currentSegment: Int = 0, val totalSegments: Int = 0, val completedSegments: Int = 0,
+    val phase: String = "", val uploadPercent: Int = -1,
     val liveText: String = "", val liveMessage: String = "", val summary: String = ""
 )
 
@@ -115,10 +117,10 @@ class RecordingService : Service() {
                 uploads.execute {
                     val pending = RecordingStore.pending(folder).size
                     val captureError = File(folder, "capture-error.txt").exists()
-                    var summary = ""
+                    var summary = RecordingStore.savedSummary(folder)
                     var summaryFailed = false
                     if (importing && intent?.getBooleanExtra("autoSummary", false) == true && pending == 0 && !captureError) {
-                        RecordingState.update { it.copy(message = "转写完成，正在生成总结") }
+                        RecordingState.update { it.copy(message = "转写完成，正在生成总结", phase = "生成总结", uploadPercent = -1) }
                         try {
                             summary = RecordingSummary.generate(cloud, RecordingStore.transcript(folder), getSharedPreferences("vox_prefs", MODE_PRIVATE).getString("language", "中文") ?: "中文")
                             RecordingStore.atomicText(File(folder, "summary.txt"), summary)
@@ -187,9 +189,15 @@ class RecordingService : Service() {
         uploads.execute {
             val textFile = File(audio.parentFile, audio.nameWithoutExtension + ".txt")
             if (RecordingStore.hasTranscript(textFile) || uploadFailed) return@execute
+            val folder = audio.parentFile!!
+            val segments = RecordingStore.segments(folder)
+            RecordingState.update { it.copy(currentSegment = segments.indexOf(audio) + 1, totalSegments = segments.size,
+                completedSegments = segments.size - RecordingStore.pending(folder).size, phase = "连接转写接口", uploadPercent = -1) }
             try {
-                RecordingStore.atomicText(textFile, cloud.transcribe(audio))
-                RecordingState.update { it.copy(text = RecordingStore.transcript(audio.parentFile!!)) }
+                RecordingStore.atomicText(textFile, cloud.transcribe(audio) { percent ->
+                    RecordingState.update { it.copy(uploadPercent = percent, phase = if (percent >= 100) "等待接口识别结果" else "上传音频 $percent%") }
+                })
+                RecordingState.update { it.copy(text = RecordingStore.transcript(folder), completedSegments = RecordingStore.segments(folder).size - RecordingStore.pending(folder).size, phase = "本段转写已保存", uploadPercent = -1) }
             } catch (e: Exception) {
                 uploadFailed = true
                 // Keep audio and leave the segment pending; never persist keys or response bodies.

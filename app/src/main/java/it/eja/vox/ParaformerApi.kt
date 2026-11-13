@@ -26,18 +26,23 @@ internal class ParaformerResults(private val maxCharacters: Int = Int.MAX_VALUE)
 class ParaformerApi(private val client: OkHttpClient) {
     private val active = ConcurrentHashMap.newKeySet<WebSocket>()
 
-    fun transcribe(profile: ApiProfile, audio: File): String {
+    fun transcribe(profile: ApiProfile, audio: File, progress: (Int) -> Unit = {}): String {
         if (profile.model != "paraformer-realtime-v2" || audio.extension.lowercase() != "wav") {
             throw ApiUnavailable("百炼直传目前支持 paraformer-realtime-v2 和本机 WAV 录音")
         }
         return stream(profile, "wav", { socket, checkFailure ->
             audio.inputStream().use { input ->
                 val buffer = ByteArray(3200)
+                var sent = 0L
+                var previous = -1
                 while (true) {
                     checkFailure()
                     val n = input.read(buffer)
                     if (n < 0) break
                     if (!socket.send(buffer.toByteString(0, n))) throw IOException("百炼音频发送失败")
+                    sent += n
+                    val percent = (sent * 100 / audio.length().coerceAtLeast(1)).toInt().coerceAtMost(100)
+                    if (percent != previous) { previous = percent; progress(percent) }
                     Thread.sleep(100)
                 }
             }
