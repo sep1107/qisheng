@@ -55,8 +55,9 @@ class PreferenceQuota(private val prefs: SharedPreferences) : ApiQuota {
 @Composable
 fun ApiSettingsDialog(prefs: SharedPreferences, checkUpdate: () -> Unit, dismiss: () -> Unit, saved: () -> Unit) {
     val context = LocalContext.current
-    var kind by remember { mutableStateOf("asr") }
-    var index by remember { mutableStateOf(0) }
+    var page by remember { mutableStateOf(0) }
+    var asrIndex by remember { mutableStateOf(0) }
+    var llmIndex by remember { mutableStateOf(0) }
     var asr by remember { mutableStateOf(ApiProfiles.load(prefs, "asr")) }
     var llm by remember { mutableStateOf(ApiProfiles.load(prefs, "llm")) }
     var freeOnly by remember { mutableStateOf(prefs.getBoolean("free_only", true)) }
@@ -64,58 +65,67 @@ fun ApiSettingsDialog(prefs: SharedPreferences, checkUpdate: () -> Unit, dismiss
     var liveEnabled by remember { mutableStateOf(prefs.getBoolean("live_enabled", true)) }
     var receiverEnabled by remember { mutableStateOf(prefs.getBoolean("receiver_enabled", false)) }
     var autoSend by remember { mutableStateOf(prefs.getBoolean("receiver_auto_send", false)) }
-    var receiverKind by remember { mutableStateOf(prefs.getString("receiver_kind", "Mac").orEmpty()) }
     var receiverUrl by remember { mutableStateOf(prefs.getString("receiver_url", "").orEmpty()) }
     var receiverToken by remember { mutableStateOf(prefs.getString("receiver_token", "").orEmpty()) }
     var receiverError by remember { mutableStateOf("") }
-    val profile = (if (kind == "asr") asr else llm)[index]
+    val index = if (page == 0) asrIndex else llmIndex
+    val profile = (if (page == 0) asr else llm)[index]
     fun update(value: ApiProfile) {
-        if (kind == "asr") asr = asr.toMutableList().apply { set(index, value) }
+        if (page == 0) asr = asr.toMutableList().apply { set(index, value) }
         else llm = llm.toMutableList().apply { set(index, value) }
     }
-    AlertDialog(onDismissRequest = dismiss, title = { Column { Text("设置"); if (receiverError.isNotBlank()) Text(receiverError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium) } }, text = {
-        Column(Modifier.verticalScroll(rememberScrollState())) {
-            Row { Checkbox(liveEnabled, { liveEnabled = it }); Text("实时字幕") }
-            Text("默认开启，完整文字以分段转写为准。")
-            TextButton(checkUpdate) { Text("检查更新") }
-            HorizontalDivider()
-            Text("笔记接收端")
-            Row { Checkbox(receiverEnabled, { receiverEnabled = it; if (!it) autoSend = false }); Text("启用自己的 Obsidian 接收端") }
-            if (receiverEnabled) {
-                Row { listOf("Mac", "服务器").forEach { option -> TextButton({ receiverKind = option }) { Text(if (receiverKind == option) "✓ $option" else option) } } }
-                OutlinedTextField(receiverUrl, { receiverUrl = it }, label = { Text("完整 HTTPS 接收地址") }, singleLine = true)
-                OutlinedTextField(receiverToken, { receiverToken = it }, label = { Text("接收令牌（至少24位）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
-                Row { Checkbox(autoSend, { autoSend = it }); Text("总结完成后自动发送") }
-                Text("原文和总结一起发送，不自动生成总结、不发送音频、不追溯旧总结。断网后台重试，不阻塞录音；已发送版本不自动覆盖。")
+    AlertDialog(onDismissRequest = dismiss, title = {
+        Column {
+            Row(Modifier.fillMaxWidth()) {
+                Text("设置", Modifier.weight(1f))
+                TextButton(checkUpdate) { Text("检查更新") }
             }
-            HorizontalDivider()
-            Text("接口与免费额度")
-            Text("按 1→2→3 顺序尝试，仅启用的接口会接收音频/文字。免费额度和价格须在服务商控制台确认。")
-            Row { Checkbox(freeOnly, { freeOnly = it }); Text("仅使用我确认仍有免费额度的接口") }
-            Row {
-                TextButton({ kind = "asr" }) { Text("转写") }
-                TextButton({ kind = "llm" }) { Text("总结") }
+            Row(Modifier.fillMaxWidth()) {
+                listOf("转写 API", "总结 API", "发送配置").forEachIndexed { n, label ->
+                    TextButton({ page = n }, Modifier.weight(1f), contentPadding = PaddingValues(horizontal = 2.dp, vertical = 8.dp),
+                        colors = ButtonDefaults.textButtonColors(containerColor = if (page == n) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)) {
+                        Text(label, maxLines = 1, style = MaterialTheme.typography.bodySmall)
+                    }
+                }
             }
-            Row { (0..2).forEach { n -> TextButton({ index = n }) { Text(if (index == n) "【${n + 1}】" else "${n + 1}") } } }
-            Row { Checkbox(profile.enabled, { update(profile.copy(enabled = it)) }); Text("启用此接口") }
-            TextField(profile.name, { update(profile.copy(name = it)) }, label = { Text("接口名称") })
-            TextField(profile.url, { update(profile.copy(url = it)) }, label = { Text("完整 HTTPS / WSS 接口地址") })
-            TextField(profile.key, { update(profile.copy(key = it)) }, label = { Text("API Key") }, visualTransformation = PasswordVisualTransformation())
-            TextField(profile.model, { update(profile.copy(model = it)) }, label = { Text("模型 ID") })
-            Row { Checkbox(profile.free, { update(profile.copy(free = it)) }); Text("已在控制台确认有免费额度") }
-            TextField(profile.freeUntil, { update(profile.copy(freeUntil = it)) },
-                label = { Text("免费截止日期 YYYY-MM-DD（UTC，可留空）") })
-            TextField(if (profile.dailyLimit == 0) "" else profile.dailyLimit.toString(),
-                { value -> if (value.all(Char::isDigit)) update(profile.copy(dailyLimit =
-                    if (value.isEmpty()) 0 else (value.toLongOrNull() ?: Int.MAX_VALUE.toLong()).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())) },
-                label = { Text("本机每日请求上限（留空不限制）") })
-            Text("UTC 每日重置；次数在发送前计入。不是服务商真实剩余额度，也不能阻止服务商自动扣费。")
-            val host = runCatching { java.net.URI(profile.url).host }.getOrNull()
-            val until = host?.let { prefs.getLong("cooldown_${it.lowercase()}", 0) } ?: 0
-            if (until > System.currentTimeMillis()) Text("服务商冷却至 " + java.text.DateFormat.getDateTimeInstance().format(java.util.Date(until)))
-            TextField(language, { language = it }, label = { Text("总结语言") })
-            Spacer(Modifier.height(8.dp))
-            Text("没有可用免费接口时只保存录音，不自动启用付费接口。超时切换可能产生重复计费；请同时在服务商关闭自动充值或设消费上限。")
+            if (receiverError.isNotBlank()) Text(receiverError, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+        }
+    }, text = {
+        key(page) {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                if (page == 2) {
+                    Text("接收端使用同一协议，只需填写地址和令牌。")
+                    Row { Checkbox(receiverEnabled, { receiverEnabled = it; if (!it) autoSend = false }); Text("启用接收端") }
+                    OutlinedTextField(receiverUrl, { receiverUrl = it }, label = { Text("完整 HTTPS 接收地址") }, singleLine = true)
+                    OutlinedTextField(receiverToken, { receiverToken = it }, label = { Text("接收令牌（至少24位）") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                    Row { Checkbox(autoSend, { autoSend = it }, enabled = receiverEnabled); Text("总结完成后自动发送") }
+                    Text("原文和总结一起发送，不自动生成总结、不发送音频、不追溯旧总结。断网后台重试，不阻塞录音；已发送版本不自动覆盖。")
+                } else {
+                    if (page == 0) {
+                        Row { Checkbox(liveEnabled, { liveEnabled = it }); Text("实时字幕") }
+                        Text("默认开启，完整文字以分段转写为准。")
+                    }
+                    Text("按 1→2→3 顺序尝试；仅启用的接口会接收${if (page == 0) "音频" else "文字"}。")
+                    Row { Checkbox(freeOnly, { freeOnly = it }); Text("仅使用我确认仍有免费额度的接口") }
+                    Row { (0..2).forEach { n -> TextButton({ if (page == 0) asrIndex = n else llmIndex = n }) { Text(if (index == n) "【${n + 1}】" else "${n + 1}") } } }
+                    Row { Checkbox(profile.enabled, { update(profile.copy(enabled = it)) }); Text("启用此接口") }
+                    TextField(profile.name, { update(profile.copy(name = it)) }, label = { Text("接口名称") })
+                    TextField(profile.url, { update(profile.copy(url = it)) }, label = { Text(if (page == 0) "完整 HTTPS / WSS 接口地址" else "完整 HTTPS 总结接口地址") })
+                    TextField(profile.key, { update(profile.copy(key = it)) }, label = { Text("API Key") }, visualTransformation = PasswordVisualTransformation())
+                    TextField(profile.model, { update(profile.copy(model = it)) }, label = { Text("模型 ID") })
+                    Row { Checkbox(profile.free, { update(profile.copy(free = it)) }); Text("已在控制台确认有免费额度") }
+                    TextField(profile.freeUntil, { update(profile.copy(freeUntil = it)) }, label = { Text("免费截止日期 YYYY-MM-DD（UTC，可留空）") })
+                    TextField(if (profile.dailyLimit == 0) "" else profile.dailyLimit.toString(),
+                        { value -> if (value.all(Char::isDigit)) update(profile.copy(dailyLimit =
+                            if (value.isEmpty()) 0 else (value.toLongOrNull() ?: Int.MAX_VALUE.toLong()).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())) },
+                        label = { Text("本机每日请求上限（留空不限制）") })
+                    val host = runCatching { java.net.URI(profile.url).host }.getOrNull()
+                    val until = host?.let { prefs.getLong("cooldown_${it.lowercase()}", 0) } ?: 0
+                    if (until > System.currentTimeMillis()) Text("服务商冷却至 " + java.text.DateFormat.getDateTimeInstance().format(java.util.Date(until)))
+                    if (page == 1) TextField(language, { language = it }, label = { Text("总结语言") })
+                    Text("UTC 每日重置；本机计数不是服务商真实剩余额度。免费价格须在服务商核实，超时重试可能计费。")
+                }
+            }
         }
     }, confirmButton = { TextButton({
         runCatching {
@@ -127,7 +137,7 @@ fun ApiSettingsDialog(prefs: SharedPreferences, checkUpdate: () -> Unit, dismiss
             ApiProfiles.save(prefs, asr + llm)
             val edit = prefs.edit().putBoolean("free_only", freeOnly).putString("language", language).putBoolean("live_enabled", liveEnabled)
                 .putBoolean("receiver_enabled", receiverEnabled).putBoolean("receiver_auto_send", autoSend && receiverEnabled)
-                .putString("receiver_kind", receiverKind).putString("receiver_url", receiverUrl.trim()).putString("receiver_token", receiverToken.trim())
+                .putString("receiver_url", receiverUrl.trim()).putString("receiver_token", receiverToken.trim())
             if (resetSince) edit.putLong("receiver_auto_since", System.currentTimeMillis())
             check(edit.commit()) { "设置保存失败，请检查存储空间" }
             NoteDelivery.resume(context)
