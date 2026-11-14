@@ -52,7 +52,7 @@
 
 下载直接复用 MIT 开源 [jenly1314/AppUpdater 2.2.0](https://github.com/jenly1314/AppUpdater)，不自动安装。柒声校验大小、SHA-256、包名、版本递增和与当前安装一致的签名后，才请求安卓安装器，最终由用户确认。需要时由用户授权安装来源。GitHub 无法访问时检查或下载会失败。
 
-[0.6.12 更新包](https://github.com/sep1107/qisheng/releases/tag/v0.6.12) 沿用现有安装签名，供覆盖安装试用；本版已在搜狗 Android 8.1 录音笔验证设置和接口调用。覆盖安装保留现有 API 配置与历史，请勿卸载旧版或清除应用数据。CI 仅验证构建，不发布使用临时调试签名的 APK。后续更新须保留首次安装的签名密钥，不能换用 CI 自动生成的另一把调试密钥。
+[0.6.13 更新包](https://github.com/sep1107/qisheng/releases/tag/v0.6.13) 沿用现有安装签名，供覆盖安装试用；本版仅简化发送成功提示；此前 0.6.12 已完成搜狗录音笔设置及接口实测。覆盖安装保留现有 API 配置与历史，请勿卸载旧版或清除应用数据。CI 仅验证构建，不发布使用临时调试签名的 APK。后续更新须保留首次安装的签名密钥，不能换用 CI 自动生成的另一把调试密钥。
 
 ## 长录音边界
 
@@ -75,7 +75,7 @@
 ./gradlew testDebugUnitTest assembleDebug lintDebug
 ```
 
-本地构建 APK：`app/build/outputs/apk/debug/app-debug.apk`。正式更新资产命名为 `qisheng-0.6.12.apk`，须使用与现有安装相同的签名；公开源码仓库为 [sep1107/qisheng](https://github.com/sep1107/qisheng)。
+本地构建 APK：`app/build/outputs/apk/debug/app-debug.apk`。正式更新资产命名为 `qisheng-0.6.13.apk`，须使用与现有安装相同的签名；公开源码仓库为 [sep1107/qisheng](https://github.com/sep1107/qisheng)。
 单元测试覆盖中断 WAV 修复、分段顺序、补传判定、单段大小和长总结输入不丢失。真机验证记录见仓库 `VALIDATION.md`。
 
 ---
@@ -202,3 +202,8 @@ To build the project locally:
 设置分为「转写 API」「总结 API」「发送配置」。转写和总结各保留三个顺序备用槽位；发送只需地址和令牌，不再选择 Mac/服务器，保留启用与自动发送开关。覆盖安装沿用原配置。总结支持 OpenAI 兼容 `/v1/chat/completions`，不是 Anthropic `/v1/messages`。
 
 `app/src/androidTest` 使用合成语音/文本，默认跳过联网测试。明确传入 `-e liveApis true` 才会使用设备接口并可能消耗额度，须先确认接收端为隔离环境。离线用例另须 `-e offlineTest true`，运行前断开设备网络，结束后恢复。
+
+
+## 0.6.13：简化成功提示
+
+收到有效匹配回执后统一显示「发送成功」，失败处理与重试不变。覆盖安装保留现有 API、接收配置和录音历史。
