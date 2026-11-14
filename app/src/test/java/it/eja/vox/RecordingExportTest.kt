@@ -43,9 +43,9 @@ class RecordingExportTest {
         assertTrue(files.keys.none { it.endsWith(".md") || it.endsWith(".txt") })
         assertArrayEquals(byteArrayOf(1, 2, 3, 4), File(session, "000000.wav").readBytes())
     }
-    @Test fun receiptMustMatchAndQueuedNeverClaimsDelivered() {
-        assertTrue(ReceiverReceipt.message(202, "id", "hash", "id", "hash", "queued").contains("尚未确认"))
-        assertTrue(ReceiverReceipt.message(201, "id", "hash", "id", "hash", "saved").contains("接收端已保存"))
+    @Test fun receiptMustMatchAndShowsSimpleSuccess() {
+        assertEquals("发送成功", ReceiverReceipt.message(202, "id", "hash", "id", "hash", "queued"))
+        assertEquals("发送成功", ReceiverReceipt.message(201, "id", "hash", "id", "hash", "saved"))
         assertThrows(IllegalStateException::class.java) { ReceiverReceipt.message(200, "id", "hash", "other", "hash", "saved") }
         assertThrows(IllegalStateException::class.java) { ReceiverReceipt.message(200, "id", "hash", "id", "other", "saved") }
         assertThrows(IllegalStateException::class.java) { ReceiverReceipt.message(202, "id", "hash", "id", "hash", "saved") }
