@@ -109,10 +109,10 @@ python3 receiver/evaluate_livesync.py \
 集成测试包括 HTTP 接收、实际小红书适配器、真实双 CLI 加密同步、断网、进程重启、回执丢失后用户编辑、移动/删除后重试、备份故障与恢复，以及 CLI 缓存丢失保护。它不等于录音笔 APK、外网 HTTPS 或手机 Obsidian 真机验收。
 
 
-## 仅上传适配器（验证中，未接正式库）
+## 可选仅上传适配器
 
 `qisheng_upload_only.py` 固定官方 CLI 镜像和 bundle 哈希，只将 `sync` 命令改接官方 `replicateAllToRemote`；不自行实现加密、分块或 CouchDB 文档。独立本地数据库只能写入柒声收集箱，不能与普通双向 CLI 共用缓存。
 
 连接前兼容性检查本来会抽查远端文件。适配器另经本机环回代理限制：远端兼容性抽查改为仅查询本客户端登记的笔记和块 ID；禁止 changes、无范围 all_docs、其他文档读取及删除。只允许必要的同步元数据、自己的修订差异和自己的批量上传。限制用于约束客户端访问，不是 CouchDB 账号级权限隔离，也不能防服务器管理员读取持有的凭据。
 
-`prepare --source <官方bundle> --target <生成bundle>` 在哈希不匹配时拒绝生成。`guard --root <私有运行目录>` 仅监听环回 18770；该目录需含连接配置与本机自己的 ID 登记。队列 argv 可指向 `python3 qisheng_upload_only.py cli --root <私有运行目录>`。正式启用前须完成整个适配器的隔离端到端验证，并明确授权服务器保存现有同步凭据和解密口令。当前尚未部署正式接收端或连接正式库。
+`prepare --source <官方bundle> --target <生成bundle>` 在哈希不匹配时拒绝生成。`guard --root <私有运行目录>` 仅监听环回 18770；该目录需含连接配置与本机自己的 ID 登记。队列 argv 可指向 `python3 qisheng_upload_only.py cli --root <私有运行目录>`。正式启用前须完成整个适配器的隔离端到端验证，并明确授权服务器保存现有同步凭据和解密口令。2026-11-15 已在用户明确授权的正式库验证接入，默认安装仍不自动连接任何库。部署时须沿用目标库所有兼容参数，不能通过关闭校验消除 mismatch；旧库要求登记新客户端时，先备份同步元数据，再用官方 mark-resolved 只追加该客户端，并核对原设备与锁状态不变。不要以 fetch/rebuild 或全局解锁替代这一步。

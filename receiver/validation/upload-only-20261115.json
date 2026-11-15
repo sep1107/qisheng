@@ -6,5 +6,12 @@
   "unrelated_note_not_downloaded": true,
   "denied_requests_during_successful_flow": 0,
   "unit_tests": 15,
-  "production_receiver_enabled": false
+  "production_receiver_enabled": true,
+  "formal_canary_arrived_mac": true,
+  "formal_canary_confirmed_phone_by_user": true,
+  "https_timer_delivered": true,
+  "deduplication_http_200": true,
+  "backup_integrity_checked": true,
+  "existing_sync_configuration_unchanged": true,
+  "isolation_history_replayed": false
 }
