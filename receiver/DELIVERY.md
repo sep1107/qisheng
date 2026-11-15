@@ -52,7 +52,7 @@ python3 receiver/delivery_queue.py \
   deliver --cli-command-file '/srv/my-note-delivery/cli-command.json'
 ```
 
-需要无人值守重试时，将上述命令配置为 systemd oneshot，用 timer 的 `OnBootSec=30s`、`OnUnitInactiveSec=30s` 串行调度，接收器另作为常驻服务。应设置服务用户、私有目录权限和启动限制。当前只完成隔离测试，**没有安装或启用正式服务/定时器**，不会替代或停止现有 Mac 同步。
+需要无人值守重试时，将上述命令配置为 systemd oneshot，用 timer 的 `OnBootSec=30s`、`OnUnitInactiveSec=30s` 串行调度，接收器另作为常驻服务。应设置服务用户、私有目录权限和启动限制。本示例默认不安装或启用服务/定时器，也不替代现有 Mac 同步。明确授权的实例部署与仅上传验收见下节及 VALIDATION.md。
 
 ## 小红书接入
 
