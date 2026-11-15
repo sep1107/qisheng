@@ -1,0 +1,10 @@
+{
+  "date": "2026-11-15",
+  "synthetic_only": true,
+  "pinned_official_core": true,
+  "full_adapter_upload_arrived": true,
+  "unrelated_note_not_downloaded": true,
+  "denied_requests_during_successful_flow": 0,
+  "unit_tests": 15,
+  "production_receiver_enabled": false
+}
