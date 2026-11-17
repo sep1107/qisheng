@@ -1,231 +1,85 @@
-# 柒声 QiSheng（Android 7.0+）
+# 柒声 QiSheng
 
-基于 [eja/vox](https://github.com/eja/vox) 的 GPL-3.0 衍生项目，针对低内存安卓录音设备增加长时间录音。上游版权与许可证保持不变。柒声的长录音改动与品牌由本仓库维护；本项目不代表上游官方版本。
+适合安卓录音笔的长录音、在线转写与 AI 总结应用。支持 Android 7.0 及以上，已在刷入 Android 8.1 的搜狗 S1 录音笔上进行过长录音与转写测试。
 
-## 使用
+**当前版本：0.7.1** · [下载 APK](https://github.com/sep1107/qisheng/releases/latest) · [验证记录](VALIDATION.md)
 
-1. 安装柒声 APK（包名 `io.github.sep1107.qisheng`，与上游 Vox 可并存）。
-2. 设置 ASR：完整 HTTPS `/v1/audio/transcriptions` 地址、自己的 Key 和模型 ID。硅基流动可使用 `https://api.siliconflow.cn/v1/audio/transcriptions` 与 `XingChenAGI/XingChenASR-V3.2-Ultra`；是否可用以账号权限及接口实测为准。
-3. 设置 LLM：完整 HTTPS `/chat/completions` 地址、自己的 Key、模型和输出语言。没有内置密钥，也不需要柒声账号。
-4. 点麦克风开始，授予录音权限。通知栏可停止；锁屏和切后台由前台服务与唤醒锁维持录音。
-5. 每两分钟保存一个 16 kHz、16-bit、单声道 WAV（3.84 MB），依次上传；停止时保存最后不足两分钟的片段。
-6. 网络或服务失败不丢弃录音。进入「录音历史」选择会话，点「补传未完成分段」。只有成功落盘的分段文本才跳过重传；请求成功但进程在保存前退出时，该段可能再次计费。
-7. 全部分段转写完成后，点左上 AI 按钮 → 生成总结（已有总结时直接查看缓存）。长文本按块总结后合并，原转写与音频保留，摘要存入会话目录。
+基于 [eja/vox](https://github.com/eja/vox) 开发，保留原作者版权与 [GPL-3.0 许可证](LICENSE)。本仓库独立维护柒声品牌及新增功能。
 
-## 多接口与免费额度（0.6.2）
+## 主要功能
 
-- 转写和总结各有 3 个独立接口槽，按 1 → 2 → 3 顺序尝试。每槽单独配置地址、Key、模型和启用开关；音频/文字仅发送到已启用且符合当前模式的接口。
-- 默认开启「仅使用我确认仍有免费额度的接口」。各槽默认未标记免费，必须先到服务商控制台确认额度再手动勾选；不会因为保存了 Key 就自动认为免费。关闭此模式后可能使用付费接口。
-- 免费试用可填写截止日期（UTC、包含当天），到期或日期格式无效会在免费模式下自动跳过，不等服务商扣费后才切换。留空表示未设置到期保护。
-- 可选本机每日请求上限，按 UTC 日期重置，发出请求前计数（失败和超时也计入）。这是本机的请求次数保护，不是账号的剩余分钟数/余额，不统计其他客户端的用量，也不保证请求免费。
-- HTTP 429 尊重 `Retry-After`（至少冷却 60 秒）；402 冷却至少 6 小时；401/403 至少冷却 60 秒，留出修正密钥的时间；5xx 与网络失败短暂冷却。相同主机下的 Key 和模型共享冷却，不通过换 Key 绕过同一服务商限制。冷却跨应用重启保留。
-- HTTP 400/413、响应格式错误等配置/输入问题直接停止该次处理，不向其他平台重复发送错误请求。
-- 每次依次调用，最多尝试各槽一次，不并发、不无限重试。全部失败则保留音频并暂停本轮上传，后续在历史中补传。
-- 超时可能发生在服务端已经完成之后，切换或补传可能重复计费；柒声无法取消服务商计费。请在服务商设置消费上限、关闭自动充值。免费政策会变，不承诺永久免费，不自动注册账号。
-- 转写使用 OpenAI 兼容 `audio/transcriptions`，总结使用 `chat/completions`。只配置能提供对应接口的模型；百炼 `qwen3-asr-flash` 的聊天式音频接口不能直接填写为转写接口。
+- **长录音**：本机麦克风采集，前台服务支持锁屏和切后台；每两分钟保存一个 WAV 分段，没有15分钟的应用录音上限。
+- **系统录音导入**：授权录音目录后按时间列出文件，选择后转写，可选转写完成后自动总结。支持系统文件选择及从其他 App 分享音频，原文件保留。
+- **在线转写**：转写 API 和总结 API 各有三个槽位，按顺序尝试。失败保留音频，可补传未完成分段。
+- **句子时间戳**：保留百炼与 Groq 返回的句子/识别片段起始时间，换算为整条录音的时分秒；不支持的接口显示分段定位。
+- **可选多人模式**：默认关闭。星辰多人模型返回“分段N·说话人X”，编号只在本分段有效，不识别真实姓名或跨段关联；其他接口可回退普通转写。
+- **实时字幕**：默认开启，使用百炼显示录音中的文字预览；完整转写按分段另行保存。
+- **AI 总结**：生成标题，整理重点、结论与决定、待办和未决问题；保留观点归属、不确定性、数字和条件。明确更正以最终确认说法为准，保留必要的新旧关系；重要结论和待办引用已有原文时间戳，不编造定位。
+- **历史管理**：备注改名、可恢复回收站、逐条或全部清空回收站。手动备注优先于 AI 标题。
+- **保存笔记**：导出 Markdown，包含总结和原文；音频 ZIP 可选、默认关闭，ZIP 中只放音频。文件名采用“年月日_时分秒 标题”。
+- **可选自动入库**：填写自己的 HTTPS 接收地址与令牌，手动发送或总结完成后自动发送原文和总结；无需先保存笔记。可自建在 Mac 或服务器，不绑定个人服务。
+- **在线更新**：设置中检查 GitHub 正式版本，校验 APK 后由用户确认安装。Android 8.1 录音笔覆盖安装后尝试打开主界面，不自动录音。
 
-当前可优先验证的组合：硅基流动星辰 ASR + 星辰文本总结；百炼作为国内备用、Groq 作为需代理的额外备用；均需先验证设备网络及账户限额。资料：[硅基流动价格](https://www.siliconflow.cn/pricing)、[Groq 限额](https://console.groq.com/docs/rate-limits)。实际免费资格、额度和付费切换均以各账号控制台为准。
+## 安装与更新
 
-## 百炼 Paraformer 国内备用（0.6.3）
+从 [最新 Release](https://github.com/sep1107/qisheng/releases/latest) 下载 `qisheng-0.7.1.apk`。应用包名为 `io.github.sep1107.qisheng`。
 
-支持 `paraformer-realtime-v2` 的 WebSocket 协议。填写完整地址 `wss://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference`、该业务空间的专用 Key 和模型 ID，即可放入转写接口槽位。Key 只授权此模型即可，不需要开通 OSS。
+已有柒声请直接覆盖安装，**不要卸载旧版或清除数据**，这样保留现有 API、发送配置和历史。新版沿用现有签名及配置键。安装完成后能否自动打开仍受厂商系统策略影响；Android 10及以上保持手动打开。
 
-这里使用实时接口传输已经保存的 WAV 分段，界面仍是每两分钟分段转写，不提供逐字字幕。按 100 ms 音频帧发送，百炼备用时传输耗时约等于音频长度，可能晚于主接口出字；网络线程与录音线程独立。
+应用内入口为「设置 → 检查更新」。需要设备能访问 GitHub；下载后检查文件大小、SHA-256、包名、递增版本与现有签名，匹配后才请求系统安装器。使用 MIT 开源 [AppUpdater](https://github.com/jenly1314/AppUpdater) 下载，不静默安装。
 
-北京地域该模型目前每月有 36,000 秒免费额度，须在百炼控制台确认并开启该模型的“免费额度用完即停”。它和 `paraformer-v2` 录音文件接口是不同模型，额度与开关须分别核对。免费耗尽、限流或网络失败时尝试下一个接口，全部不可用则保留音频。专用域名、账号凭据和实际余额不写入公开仓库。
+## 配置转写与总结
 
-参考：[官方 WebSocket 协议](https://help.aliyun.com/zh/model-studio/websocket-for-paraformer-real-time-service)、[模型价格与每月额度](https://help.aliyun.com/zh/model-studio/model-pricing)。
+设置分为「转写 API」「总结 API」「发送配置」。每类 API 可填三个接口，按1→2→3尝试；没有内置 Key，也不需要柒声账号。
 
-## 0.6.5：录音列表、历史管理、实时字幕与在线更新
+| 用途 | 配置 |
+|---|---|
+| 星辰等 OpenAI 兼容转写 | 完整 HTTPS `audio/transcriptions` 地址、Key、模型 ID |
+| 百炼转写及字幕 | 完整 WSS 地址、Key、`paraformer-realtime-v2` |
+| Groq 转写 | 完整 HTTPS 转写地址、Key、Whisper 模型；部分网络出口需要代理 |
+| 总结 | 完整 HTTPS `chat/completions` 地址、Key、模型及输出语言 |
 
-- **系统录音**：首次授权录音目录；搜狗 Android 8.1 可选择内部存储，自动扫描年月目录，按录音文件名时间（缺失时按修改时间）倒序排列。支持刷新、更换目录和手动选文件，回到 App 时自动刷新。系统原文件不改动、不删除。
-- **已导入标记**：根据来源 URI、大小及修改时间标记完整导入的文件，点已导入条目可查看历史。0.6.4 旧导入没有来源信息，无法自动标记。
-- **自动总结**：从系统录音列表选择文件后，可勾选“转写完成后自动总结”。转写未全部成功时保留音频，补传后可在 AI 操作中手动总结。
-- **录音历史**：可改备注名；删除须确认，柒声音频、转写和总结一起移入应用内回收站并可恢复。回收站支持逐条或全部彻底清除，需再次确认且不可恢复。
-- **实时字幕**：默认开启，在设置中可关闭；麦克风录音时通过已启用的百炼 `paraformer-realtime-v2` 显示字幕预览。录音先写盘，再非阻塞投递副本；缓冲满、网络失败或额度不可用则停止字幕，原录音和分段转写继续。
-- 实时预览会额外消耗百炼免费时长，和完整分段转写是独立请求。字幕仅保留最近 3000 字，不代替完整逐字稿；完整结果以历史中保存的分段转写为准。实时连接失败后本次录音不自动重连。
-- AI 操作、总结、翻译、纠正语法、执行、取消等菜单已中文化。
+百炼可用业务空间域名 `wss://<WorkspaceId>.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference`，具体以账号地域和官方控制台为准。无需 OSS；按100ms音频帧上传，完整分段传输耗时约等于音频长度。
 
-### 在线更新和签名
+「转写 API」页可切换实时字幕及多人模式。多人开启时，现有硅基流动星辰 ASR 槽位请求 `XingChenAGI/XingChenASR-Diarize-V3.0`，沿用该槽位的 Key、免费标记及限额，不改写保存的模型。模型可用性和额度需自行确认。其他接口不提供说话人区分时会提示并继续普通转写；实时字幕仍为百炼普通预览。
 
-在设置中点“检查更新”，查询 `sep1107/qisheng` 的 GitHub 正式 Release。APK 须命名为 `qisheng-<版本号>.apk`，标签为 `v<主版本>.<次版本>.<修订号>`，版本编码规则如 `v0.6.9` 对应 609。资产必须提供 GitHub 的 SHA-256 `digest`。
+免费模式默认开启，需先在服务商控制台确认，再标记“有免费额度”。可设免费截止日和本机每日请求上限；这不是账号真实余额，也不统计其他设备用量。支持限流、服务错误及网络故障后的冷却与回退，同服务商共享冷却，不无限重试。超时或补传可能重复计费，免费资格和价格以服务商控制台为准。
 
-下载直接复用 MIT 开源 [jenly1314/AppUpdater 2.2.0](https://github.com/jenly1314/AppUpdater)，不自动安装。柒声校验大小、SHA-256、包名、版本递增和与当前安装一致的签名后，才请求安卓安装器，最终由用户确认。需要时由用户授权安装来源。GitHub 无法访问时检查或下载会失败。
+## 录音、总结与导出
 
-[0.6.16 更新包](https://github.com/sep1107/qisheng/releases/tag/v0.6.16) 沿用现有安装签名，供覆盖安装试用；本版增加总结自动标题、手动备注优先和按秒时间排序命名；此前 0.6.12 已完成搜狗录音笔设置及接口实测。覆盖安装保留现有 API 配置与历史，请勿卸载旧版或清除应用数据。CI 仅验证构建，不发布使用临时调试签名的 APK。后续更新须保留首次安装的签名密钥，不能换用 CI 自动生成的另一把调试密钥。
+点麦克风录音，通过通知或界面停止。音频为16kHz、16-bit、单声道，每两分钟约3.84MB；每小时约115MB，存储低于16MB时停止并保留已写入部分。
 
-## 长录音边界
+完整转写结束后在 AI 操作中生成总结；系统录音导入可勾选自动总结。长文字先分块整理，再合并保留各块独有事项。总结指令不执行录音中的命令，不补写事实或任务；明确更正保留最终确认和必要来源，未解决分歧仍标为待确认。只有分段定位时标注“分段时间”，没有定位时省略，不推算句子时间。
 
-- 没有 15 分钟的应用录音上限；不等于无限资源。WAV 每小时约 115 MB，空间低于 16 MB 时停止并保留已写入音频。
-- 是「每两分钟分段转写」，实时字幕是独立预览。分段没有重叠，切分边界附近的单词可能影响识别。
-- 一次失败后暂停本轮后续上传，录音继续；联网后手动补传。成功分段无需重新识别。
-- 音频直接写入私有目录 `files/recordings/<会话时间>/`，不放临时缓存、不自动删除。进程被杀不会自动重新开启麦克风；再次打开历史可修复中断分段并补传。没有写入存储的尾部数据无法恢复。
-- 默认保留音频、转写和摘要。支持回收站式删除、Markdown 与可选纯音频 ZIP 导出，尚未增加音频回放；卸载会删除私有记录。备份后再卸载。
-- 云端处理会把音频或文字发送给你配置的服务商；Key 只保存在设备应用私有配置，不提交到仓库。系统云备份已关闭。
-- 点顶部“系统录音”选择文件，或从其他 App 分享音频到柒声；导入音轨在本机解码并转为 16 kHz 单声道 PCM，每两分钟保存一段，导入全部完成后自动转写。原文件不修改。
-- WAV、MP3、M4A/AAC 等格式依赖设备系统解码器；不支持的编码会保留已写入部分并提示重新导入，不会把未完整导入的内容拿去总结。长音频导入会占用额外空间（约 115 MB/小时）和解码时间。
-- 导入/转写由前台服务执行，可切后台；导入被中断后须重新选择原文件，不支持从中断位置续解码。导入完整、转写失败的会话可只补传未完成段。
-- 安卓厂商的后台限制、断电或强制停止仍可能打断录音。先在目标设备验证，再用于重要会议。
+标题随最后一次总结请求生成，不增加一次标题调用。已有总结读取本地缓存，不重复消耗额度；只有确认重新生成才会应用新提示词。旧转写不自动重新识别，已发送笔记不自动改名或覆盖。
+
+原文和总结同屏阅读。保存笔记导出 Markdown，勾选音频时另存纯音频 ZIP；导入的系统录音同样支持。历史删除先移入应用内回收站，彻底清空需确认。
+
+## 可选发送到 Obsidian
+
+在「发送配置」填写自己的完整 HTTPS 接收地址和令牌，可选开启“总结完成后自动发送”。发送仅包含原文与总结，不含音频。后台持久排队并在联网后重试；录音或转写忙碌时暂缓，已接收版本不自动覆盖。
+
+接收端可以部署在 Mac 或服务器；Mac 关机时需等待恢复，服务器可持续接收。进入 Obsidian 的方式由自己的接收端和同步方案决定，发送成功不代表每台设备已完成同步。
+
+部署与协议见 [接收端说明](receiver/README.md)、[持久交付与恢复](receiver/DELIVERY.md)。令牌和数据库凭据由各使用者自行配置，不内置于 APK 或仓库。
+
+## 使用边界
+
+- 录音写盘与网络处理分离，全部接口不可用时保留音频，后续手动补传；未落盘的断电尾部无法恢复。
+- 实时字幕是额外的百炼请求，会额外消耗额度；只保留最近3000字预览，不代替完整转写。预览失败不停止录音。
+- 两分钟分段没有重叠，边界词可能影响识别。说话人、时间戳、转写和总结都可能有误，重要内容应回听核对；不保证长录音摘要完全无遗漏。
+- 导入格式依赖系统解码器，支持常见 WAV、MP3、M4A/AAC 等；中断导入需重新选择原文件，完整导入后的失败转写可只补传。
+- 音频、文字和配置保存在应用私有目录；卸载会删除。Key 不提交到仓库，系统云备份关闭；云端转写和总结会把对应材料发送给配置的服务商。
+- 厂商后台策略、断电和强制停止可能打断任务；请先在目标设备试用，再用于重要会议。尚未增加应用内音频回放。
 
 ## 构建与验证
 
-需要 JDK 17、Android SDK 36，执行：
+使用 JDK17、Android SDK36：
 
 ```sh
 ./gradlew testDebugUnitTest assembleDebug lintDebug
 ```
 
-本地构建 APK：`app/build/outputs/apk/debug/app-debug.apk`。正式更新资产命名为 `qisheng-0.6.16.apk`，须使用与现有安装相同的签名；公开源码仓库为 [sep1107/qisheng](https://github.com/sep1107/qisheng)。
-单元测试覆盖中断 WAV 修复、分段顺序、补传判定、单段大小和长总结输入不丢失。真机验证记录见仓库 `VALIDATION.md`。
+本地 APK：`app/build/outputs/apk/debug/app-debug.apk`。发布标签使用 `v0.7.1`，对应 versionCode701，资产为 `qisheng-0.7.1.apk`。后续覆盖更新需保持原签名；CI构建不应使用另一把临时签名发布。
 
----
-
-## 上游说明（以下为原项目文档，商店及发布链接指向上游 Vox）
-
-
-
-
-
-**Vox** is a highly configurable Android application designed for seamless audio recording, speech-to-text transcription, and advanced AI-driven text processing. By leveraging external Automatic Speech Recognition (ASR) and Large Language Model (LLM) APIs, Vox empowers users to transcribe voice memos and immediately process the text for summarization, translation, grammatical correction, and custom contextual prompts.
-
-## Features
-
-* **High-Fidelity Audio Recording**: Captures audio in 16kHz, 16-bit PCM WAV format to ensure optimal compatibility with modern ASR engines.
-* **Customizable ASR Integration**: Interfaces with OpenAI's Whisper API by default, but can be configured to communicate with any compatible external or self-hosted ASR endpoint.
-* **AI Text Processing**: Integrated LLM actions allow users to seamlessly:
-  * Summarize transcriptions.
-  * Translate text into specified target languages.
-  * Correct grammar and spelling.
-  * Execute custom user-defined prompts against the transcribed text.
-* **Intent Sharing Support**: Accepts audio files shared from other applications via the native Android sharing menu (`Intent.ACTION_SEND`), processing them instantly.
-* **Markdown Rendering**: Formats and presents LLM responses using built-in HTML/Markdown rendering for high readability.
-* **Complete Data Control**: Users can define their own API URLs, authentication tokens, and model identifiers directly within the application settings.
-
-## Installation
-
-Vox is available for download across the following platforms:
-
-* **Google Play Store**: [Download Vox on Google Play](https://play.google.com/store/apps/details?id=it.eja.vox)
-* **GitHub Releases**: Pre-compiled APK files for the latest versions can be found on the [Releases page](https://github.com/eja/vox/releases).
-
-## Configuration and Usage
-
-Upon launching Vox for the first time, you will need to configure your API credentials. 
-
-1. Tap the **Settings** (gear) icon in the top right corner.
-2. Under the **ASR** section:
-   * **API URL**: Enter your transcription endpoint (e.g., `https://api.openai.com/v1/audio/transcriptions`).
-   * **Auth Token**: Enter your API Bearer token.
-   * **Model**: Specify the model name (e.g., `whisper-1`).
-3. Under the **LLM** section:
-   * **API URL**: Enter your LLM chat completion endpoint (e.g., `https://api.openai.com/v1/chat/completions`).
-   * **Auth Token**: Enter your API Bearer token.
-   * **Model**: Specify the text model name (e.g., `gpt-4o` or `gpt-3.5-turbo`).
-   * **Language**: Specify your preferred default language for translations and summarizations.
-4. Tap **Save**.
-
-### Recording and Processing
-
-* Tap the **Microphone** icon to begin recording. You will be prompted to grant audio recording permissions upon first use.
-* Tap the **Stop** icon to end the recording. The app will automatically upload the audio to your configured ASR endpoint.
-* Once the transcription is complete, tap the **AI** icon (located in the top left corner of the app bar) to open the LLM action menu and select your desired text processing operation.
-
-## Permissions
-
-* `RECORD_AUDIO`: Required to capture voice input via the device microphone.
-* `INTERNET`: Required to communicate with the configured external APIs.
-
-## Building from Source
-
-To build the project locally:
-
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/eja/vox.git
-   ```
-2. Open the project in Android Studio.
-3. Sync the Gradle files to download dependencies (Jetpack Compose, OkHttp, CommonMark, etc.).
-4. Build and deploy to your emulator or physical device.
-
-应用图标沿用小肥鱼角色的淡蓝米白水彩画风，加入麦克风；原图与生成说明见 [artwork](artwork/README.md)。Android 8 以上提供自适应图标。
-
-## 0.6.6 修复
-
-空转写不再计为完成，也不会只凭时间戳调用总结；旧版空分段会重新列为待补传。历史和完成页面同时显示转写原文与总结。回收站增加逐条彻底清除和一键清空，确认后永久删除应用内副本，不删除系统原录音；覆盖更新保留 API 配置。
-
-## 0.6.7 空结果备用切换
-
-主接口返回空文字时，按现有免费额度和冷却规则尝试下一个接口；不把空文字作为网络故障封禁整个平台，也不保存为空结果。所有接口仍为空时保留音频待补传。
-
-## 0.6.8：处理进度与总结复用
-
-录音结束后显示已完成/总分段数、当前分段、接口和处理阶段。上传进度按实际发送的音频字节计，100% 仅代表本段音频发送完毕，随后仍等待识别；接口未提供服务端识别百分比，使用等待指示。百炼按近实时速度传输，较长等待不代表录音丢失。
-
-只有存在未完成分段时显示补传按钮。原文与已保存总结可以直接切换；已有总结时“总结”读取本地文件、不调用 API。“重新生成总结”单独标明消耗额度并二次确认，成功后替换，失败保留原总结。历史记录也复用已保存总结。
-
-## 0.6.9：保存笔记、可选音频与自己的接收端
-
-“检查更新”和“实时字幕”开关移入设置，实时字幕默认开启；已有手动关闭的选择继续保留。主界面移除这两个操作入口。
-
-选中录音历史后，在正文上方点「保存笔记」打开笔记与发送窗口。本机录音和系统录音导入后的会话都支持；可以直接发送已有文字，不需要先另存文件。
-
-- 默认保存标准 UTF-8 Markdown：备注名、会话时间、已有总结、分段原文。尚未完成转写或导入时标明不完整，不重新调用 AI。
-- 界面只提供「保存笔记」；音频 ZIP 选项默认不勾选。勾选后保存到新导出目录，生成两个独立文件；ZIP 内只有 `*.wav` 音频分段，没有笔记、总结或其他文本。音频是柒声保存的 16 kHz 单声道 WAV 分段，不是系统录音机的原始压缩文件；原文件不改动。
-- 保存使用安卓系统文件选择器。如需分享，可在文件管理器选择已保存的 Markdown 或音频 ZIP，再通过系统分享交给其他 App。
-- 可选接收配置默认关闭，没有内置服务器或令牌。填写自己的完整 HTTPS 接收地址和令牌，接收端可运行在 Mac 或服务器。用户点击发送并确认目的地后，只发送已有 Markdown，不发送音频、不调用 AI、不携带 ASR/LLM 密钥。
-- Mac 模式需要 Mac 在线并运行接收端；服务器模式需要用户自行准备后续同步。不会自动配置、接入或读取任何现有 LiveSync 库。接收端「保存成功」不等于手机已同步。
-
-可直接复用的 Python 标准库接收示例和协议见 [receiver/README.md](receiver/README.md)。默认直接保存模式支持持久去重，遇到已编辑、移动、删除或同 ID 不同内容时返回冲突，不覆盖用户笔记。另有[可选持久交付队列](receiver/DELIVERY.md)：柒声与小红书按来源隔离记录、各自导出台账，共用 CLI 同步工作进程；备份成功后确认排队，断网保留状态，已同步记录不重复写回。接收令牌与数据库同步密钥分开，接收端凭据由每位用户自行配置。未自动部署或切换任何现有同步。
-
-## 0.6.10：自动发送与紧凑阅读
-
-原文和总结在同一个滚动页面连续显示，不再来回切换。「保存笔记」位于原查看原文的位置，不额外占用一排工具栏；打开后可以直接发送已有文字，无需先另存文件。
-
-发送进度与结果固定在弹窗标题下方，不随表单滚动。发送中显示等待进度，匹配有效回执后统一显示「发送成功」；失败、回执未确认及忙碌阻止操作时显示明显提示。进度条表示正在发送或等待回执，不代表 Obsidian 同步百分比。
-
-在设置的「发送配置」页统一填写 HTTPS 地址与令牌，旧配置自动沿用。可开启「总结完成后自动发送」（默认关闭）：
-
-- 开启后新完成的总结连同原文一起发送；不追溯旧总结，不发送音频，不自动调用 AI 生成总结。
-- 本机录音手动生成总结后，以及系统录音勾选自动总结并成功完成后，都触发同一发送流程。已有旧记录可手动发送。
-- 后台调度复用 [Android 官方 WorkManager](https://developer.android.com/develop/background-work/background-tasks/persistent/getting-started/define-work)，使用联网约束、唯一任务和指数退避。录音或转写期间暂缓；网络、超时、429 和服务端临时错误可重试，配置错误或内容冲突需要核对后重试。系统省电可能推迟执行；被用户强制停止后需重新打开 App。
-- 发送前冻结本条正文和目标地址，重试不会改写已排队内容。已接收记录不自动覆盖；重新生成总结或改换地址后需人工核对。修改同一地址的令牌并保存设置，可以重试未完成的记录。
-- 关闭自动发送会取消等待任务，已经在途的请求可能完成。录音移入回收站后，尚未开始的任务跳过；待发副本随录音移动和清除，不另留库外正文副本。
-- 自动发送的等待、重试和结果显示在当前记录正文上方；重新打开记录仍可查看。
-
-## 0.6.11：发送状态并发保护
-
-串行更新手动与自动发送的持久状态，避免同时写入时丢失提示。包含 0.6.10 的自动发送、固定状态提示和原文/总结合并阅读功能。
-
-
-## 0.6.12：三页设置
-
-设置分为「转写 API」「总结 API」「发送配置」。转写和总结各保留三个顺序备用槽位；发送只需地址和令牌，不再选择 Mac/服务器，保留启用与自动发送开关。覆盖安装沿用原配置。总结支持 OpenAI 兼容 `/v1/chat/completions`，不是 Anthropic `/v1/messages`。
-
-`app/src/androidTest` 使用合成语音/文本，默认跳过联网测试。明确传入 `-e liveApis true` 才会使用设备接口并可能消耗额度，须先确认接收端为隔离环境。离线用例另须 `-e offlineTest true`，运行前断开设备网络，结束后恢复。
-
-
-## 0.6.13：简化成功提示
-
-收到有效匹配回执后统一显示「发送成功」，失败处理与重试不变。覆盖安装保留现有 API、接收配置和录音历史。
-
-## 0.6.14：自动标题与时间排序
-
-总结最后一次请求同时生成标题，不额外调用标题接口；手动备注优先。新保存与发送笔记以 `yyyy-MM-dd_HHmmss 标题` 命名，秒级时间采用录音开始或导入会话时间。接收端仍追加稳定 ID 防重名。旧缓存总结不自动重跑，已发送笔记不改名；覆盖安装保留 API 配置。
-
-### 总结指令（0.6.15 起）
-
-最终总结按实际内容整理重点与关键细节、结论与决定、待办、分歧与待确认问题，空栏目省略。录音观点、建议和推测保留归属及不确定性，不作为外部核实事实；保留关键数字、条件、否定、风险和可用时间戳。长录音中间轮使用详细内容记录指令，保留各块独有事项再合并；仍可能受模型能力、转写质量和多轮压缩影响。已有缓存总结不自动重跑，需要用户确认重新生成才能应用新指令。
-
-## 0.6.15：句子时间戳与可选多人模式
-
-百炼分段结果保留句子起始时间，Groq Whisper 请求 verbose_json 的 segment 时间；显示为相对于整条录音的 `[时:分:秒]`，不支持时间戳的接口保留分段时间，不估算句子时间。原文、总结输入和导出共用这些时间标记。旧已完成转写不自动重转。
-
-设置 → 转写 API → 多人模式，默认关闭。启用后，现有硅基流动星辰 ASR 槽位请求 `XingChenAGI/XingChenASR-Diarize-V3.0`，沿用其密钥、免费标记、限额及顺序，不改写保存的模型。模型返回 speaker 时显示“分段N·说话人X”；编号只在本分段有效，不识别真实身份或跨段关联。其他接口回退普通转写并提示，录音线程不变；实时字幕仍为普通百炼预览。多人模型的可用性和额度以服务商为准。
-
-包含加强后的分块和最终总结提示词，保留观点归属、限定条件、数字、分歧和明确待办，不把说法当核实事实。旧缓存总结不自动重跑，需确认重新生成才会使用新指令。
-
-接口依据：[百炼句子时间戳](https://help.aliyun.com/zh/model-studio/paraformer-real-time-speech-recognition-python-sdk)、[Groq segment 时间戳](https://console.groq.com/docs/speech-to-text)。星辰多人返回格式用合成音频实际核验。
-
-## 0.6.16：覆盖更新后返回柒声
-
-增加仅接收本应用 `MY_PACKAGE_REPLACED` 系统广播的非导出接收器。目标 Android 8.1 录音笔在覆盖安装完成后尝试打开主界面，不自动录音；与开机自启无关。Android 10及以上因后台界面启动限制不执行自动打开。厂商安装器/系统策略可能阻止拉起，失败仍可手动打开。本版未做目标设备安装验收。
+详细验证范围及尚未实测项见 [VALIDATION.md](VALIDATION.md)。本仓库保留上游提交历史和版权，遵循 GPL-3.0。
