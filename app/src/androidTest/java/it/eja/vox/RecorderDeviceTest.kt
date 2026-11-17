@@ -60,7 +60,7 @@ class RecorderDeviceTest {
     @Test fun transcriptionApisOnRecorder() = probe("asr")
 
     @Test fun syntheticRecordingSummaryQueuesAndSendsAutomatically() {
-        assertTrue("Enable the configured isolated receiver before this opt-in test", prefs.getBoolean("receiver_auto_send", false))
+        assertTrue("Enable the explicitly approved receiver before this opt-in test", prefs.getBoolean("receiver_auto_send", false))
         assertTrue(prefs.getBoolean("receiver_enabled", false))
         val session = File(context.filesDir, "recordings/${System.currentTimeMillis()}").apply { mkdirs() }
         RecordingStore.atomicText(File(session, "name.txt"), "柒声实机自动发送测试-${session.name}")
@@ -78,6 +78,28 @@ class RecorderDeviceTest {
         assertTrue("Automatic delivery not accepted: ${NoteDeliveryStore.status(session)}", NoteDeliveryStore.accepted(session))
         assertTrue(NoteDeliveryStore.status(session).contains("发送成功"))
         report("automatic_delivery", "OK session=${session.name} transcript_chars=${text.length} summary_chars=${summary.length}")
+        val manual = NoteReceiver.send(NoteDeliveryStore.read(session, "destination"), prefs.getString("receiver_token", "").orEmpty(),
+            NoteDeliveryStore.read(session, "id"), NoteDeliveryStore.read(session, "title"), NoteDeliveryStore.read(session, "markdown"))
+        assertEquals("发送成功", manual)
+        assertEquals(summary, RecordingStore.summary(session) { error("Cached summary must not invoke AI") })
+        val markdown = java.io.ByteArrayOutputStream().also { RecordingExport.write(session, false, it) }.toString("UTF-8")
+        assertTrue(markdown.contains(text) && markdown.contains(summary))
+        val archive = java.io.ByteArrayOutputStream().also { RecordingExport.write(session, true, it) }.toByteArray()
+        val names = mutableListOf<String>()
+        java.util.zip.ZipInputStream(archive.inputStream()).use { zip ->
+            while (true) { val entry = zip.nextEntry ?: break; names.add(entry.name) }
+        }
+        assertEquals(listOf("000000.wav"), names)
+        val root = session.parentFile!!
+        val originalName = SessionLibrary.title(session)
+        SessionLibrary.rename(root, session.name, "柒声合成备注测试")
+        assertEquals("柒声合成备注测试", SessionLibrary.title(session))
+        SessionLibrary.trash(root, session.name)
+        assertFalse(session.exists())
+        SessionLibrary.restore(root, session.name)
+        assertTrue(NoteDeliveryStore.accepted(session))
+        SessionLibrary.rename(root, session.name, originalName)
+        report("manual_export_history", "OK duplicate send, cached summary, Markdown, audio-only ZIP, rename, recycle and restore")
     }
 
     @Test fun prepareOfflineAutoDelivery() {

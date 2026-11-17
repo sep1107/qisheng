@@ -9,6 +9,22 @@ import java.nio.file.Files
 import java.util.zip.ZipInputStream
 
 class RecordingExportTest {
+    @Test fun summaryTitleTimestampAndManualNamePriority() {
+        val root = Files.createTempDirectory("titles").toFile()
+        val session = File(root, "1794831435483").apply { mkdirs() }
+        File(session, "name.txt").writeText("原生录音.wav")
+        assertEquals("会议安排", RecordingStore.summary(session) { "# 门店会议\n\n会议安排" })
+        assertEquals("门店会议", SessionLibrary.title(session))
+        assertTrue(RecordingExport.filename(session, false).matches(Regex("[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{6} 门店会议.md")))
+        File(session, "name.txt").writeText("旧版手动备注")
+        assertEquals("旧版手动备注", SessionLibrary.title(session))
+        SessionLibrary.rename(root, session.name, "我的备注")
+        RecordingStore.summary(session, true) { "# 新标题\n\n新总结" }
+        assertEquals("我的备注", SessionLibrary.title(session))
+        assertTrue(RecordingExport.markdown(session).startsWith("# 我的备注"))
+        assertEquals("新总结", RecordingStore.summary(session) { error("Must use cache") })
+    }
+
     @Test fun markdownContainsPersistedTextSummaryAndWarningWithoutReadingApiSettings() {
         val session = Files.createTempDirectory("export-session").toFile()
         File(session, "name.txt").writeText("门店会议\n第二行")

@@ -108,7 +108,7 @@ fun ExportDialog(session: File, close: () -> Unit) {
                 val device = NoteDelivery.deviceId(prefs)
                 val id = "$device-${session.name}"
                 val markdown = RecordingExport.markdown(session)
-                val result = NoteReceiver.send(destination, credential, id, SessionLibrary.title(session).ifBlank { "柒声录音" }, markdown)
+                val result = NoteReceiver.send(destination, credential, id, SessionLibrary.noteTitle(session), markdown)
                 runCatching {
                     if (NoteDeliveryStore.ready(session) && NoteDeliveryStore.read(session, "id") == id &&
                         NoteDeliveryStore.read(session, "destination") == RecordingExport.receiverUrl(destination) &&

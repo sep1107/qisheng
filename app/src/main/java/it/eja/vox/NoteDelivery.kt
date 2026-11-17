@@ -22,7 +22,7 @@ object NoteDelivery {
             if (!NoteDeliveryStore.eligible(session, prefs.getLong("receiver_auto_since", Long.MAX_VALUE))) return
             val destination = RecordingExport.receiverUrl(prefs.getString("receiver_url", "").orEmpty())
             if (NoteDeliveryStore.prepare(session, destination, "${deviceId(prefs)}-${session.name}",
-                    SessionLibrary.title(session).ifBlank { "柒声录音" }, RecordingExport.markdown(session))) schedule(context, session)
+                    SessionLibrary.noteTitle(session), RecordingExport.markdown(session))) schedule(context, session)
         } catch (_: Exception) {
             runCatching { NoteDeliveryStore.status(session, "自动发送未能排队，总结仍保留；请检查接收设置或手动发送。") }
         }

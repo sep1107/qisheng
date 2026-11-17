@@ -12,11 +12,22 @@ object SessionLibrary {
     fun sessions(root: File) = root.listFiles()?.filter {
         it.isDirectory && it.canonicalFile == File(root.canonicalFile, it.name) && Regex("[0-9]+").matches(it.name)
     }?.sortedByDescending { it.name.toLongOrNull() ?: 0 } ?: emptyList()
-    fun title(session: File): String = File(session, "name.txt").takeIf { it.isFile }?.readText()?.trim().orEmpty()
+    fun title(session: File): String {
+        val name = File(session, "name.txt").takeIf { it.isFile }?.readText()?.trim().orEmpty()
+        if (File(session, "manual-name.txt").exists() || (name.isNotBlank() && !name.matches(Regex("(?i).*\\.(wav|m4a|mp3|aac|amr|ogg|flac|mp4|opus|wma|3gp)$")))) return name
+        return File(session, "auto-title.txt").takeIf { it.isFile }?.readText()?.trim()?.takeIf { it.isNotBlank() } ?: name
+    }
+    fun noteTitle(session: File): String {
+        val stamp = session.name.toLongOrNull()?.let {
+            java.text.SimpleDateFormat("yyyy-MM-dd_HHmmss", java.util.Locale.ROOT).format(java.util.Date(it))
+        } ?: session.name
+        return "$stamp ${title(session).ifBlank { "柒声录音" }}"
+    }
     fun rename(root: File, id: String, name: String) {
         require(name.length <= 100)
         val session = folder(root, id); require(session.isDirectory)
         RecordingStore.atomicText(File(session, "name.txt"), name.trim())
+        RecordingStore.atomicText(File(session, "manual-name.txt"), "1")
     }
     fun trash(root: File, id: String) {
         val source = folder(root, id); require(source.isDirectory)

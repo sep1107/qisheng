@@ -35,7 +35,12 @@ object RecordingStore {
 
     fun summary(session: File, refresh: Boolean = false, generate: () -> String): String {
         if (!refresh) savedSummary(session).takeIf { it.isNotBlank() }?.let { return it }
-        val result = requireTranscript(generate())
+        val generated = requireTranscript(generate())
+        val first = generated.lineSequence().first().trim()
+        val title = first.takeIf { it.startsWith("# ") }?.removePrefix("# ")?.trim()?.take(100).orEmpty()
+        val body = if (title.isNotBlank()) generated.substringAfter('\n', "").trim() else generated
+        val result = body.ifBlank { generated }
+        if (title.isNotBlank() && body.isNotBlank()) atomicText(File(session, "auto-title.txt"), title)
         atomicText(File(session, "summary.txt"), result)
         return result
     }

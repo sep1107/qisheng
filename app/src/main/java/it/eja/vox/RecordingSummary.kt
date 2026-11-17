@@ -11,6 +11,6 @@ object RecordingSummary {
             check(rounds++ < 8) { "总结过长，请稍后重试" }
             parts = RecordingStore.promptChunks(parts.map { request(it) }.joinToString("\n\n"))
         }
-        return request(parts.singleOrNull() ?: "")
+        return cloud.chat("$instruction\n第一行必须为 # 简短中文标题（不超过24字），随后空行输出总结正文。\n\n${parts.singleOrNull() ?: ""}")
     }
 }

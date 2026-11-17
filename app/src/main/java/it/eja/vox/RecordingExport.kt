@@ -12,9 +12,9 @@ object RecordingExport {
         if (summary.isBlank()) transcript else "## AI 总结\n\n$summary\n\n## 转写原文\n\n$transcript"
 
     fun filename(session: File, audio: Boolean): String {
-        val title = SessionLibrary.title(session).ifBlank { "柒声录音-${session.name}" }
+        val title = SessionLibrary.noteTitle(session)
             .replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").take(80).trim().trimStart('.').ifBlank { "柒声录音" }
-        return "$title-${session.name}.${if (audio) "zip" else "md"}"
+        return "$title.${if (audio) "zip" else "md"}"
     }
     fun markdown(session: File): String {
         val title = SessionLibrary.title(session).replace(Regex("[\\r\\n]"), " ").ifBlank { "柒声录音" }
