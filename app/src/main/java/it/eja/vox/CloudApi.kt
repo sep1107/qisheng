@@ -38,7 +38,10 @@ class CloudApi(private val prefs: SharedPreferences, private val report: (String
     fun transcribe(audio: File, progress: (Int) -> Unit = {}): String = router.run(ApiProfiles.load(prefs, "asr"),
         prefs.getBoolean("free_only", true), report) { p ->
         if (cancelled.get()) throw ApiUnavailable("转写已取消，录音仍保存在本机")
-        if (p.url.startsWith("wss://")) return@run RecordingStore.requireTranscript(paraformer.transcribe(p, audio, progress))
+        if (p.url.startsWith("wss://")) {
+            if (prefs.getBoolean("multi_speaker", false)) report("${p.name} 不提供说话人区分，继续普通转写")
+            return@run RecordingStore.requireTranscript(paraformer.transcribe(p, audio, progress))
+        }
         val type = when (audio.extension.lowercase()) { "wav" -> "audio/wav"; "m4a" -> "audio/mp4"; else -> "audio/mpeg" }
         val fileBody = audio.asRequestBody(type.toMediaType())
         val trackedBody = object : RequestBody() {
@@ -59,12 +62,31 @@ class CloudApi(private val prefs: SharedPreferences, private val report: (String
             }
         }
         progress(0)
-        val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+        val multi = prefs.getBoolean("multi_speaker", false)
+        val silicon = java.net.URI(p.url).host in listOf("api.siliconflow.cn", "api.siliconflow.com")
+        val model = if (multi && silicon && p.model.startsWith("XingChenAGI/XingChenASR"))
+            "XingChenAGI/XingChenASR-Diarize-V3.0" else p.model
+        val diarize = model == "XingChenAGI/XingChenASR-Diarize-V3.0"
+        if (multi && !diarize) report("${p.name} 不提供说话人区分，继续普通转写")
+        val builder = MultipartBody.Builder().setType(MultipartBody.FORM)
             .addFormDataPart("file", audio.name, trackedBody)
-            .addFormDataPart("model", p.model).build()
+            .addFormDataPart("model", model)
+        if (p.model in listOf("whisper-large-v3", "whisper-large-v3-turbo")) {
+            builder.addFormDataPart("response_format", "verbose_json")
+                .addFormDataPart("timestamp_granularities[]", "segment")
+        }
+        val body = builder.build()
         val json = request(p, body)
         if (!json.has("text")) throw ApiUnavailable("转写接口未返回 text，保留录音，请检查配置")
-        RecordingStore.requireTranscript(json.optString("text", ""))
+        val segments = json.optJSONArray("segments")
+        val timed = (0 until (segments?.length() ?: 0)).mapNotNull { index ->
+            segments?.optJSONObject(index)?.let { sentence ->
+                TranscriptTiming.line(TranscriptTiming.offset(audio), sentence.optDouble("start", Double.NaN),
+                    sentence.optString("text"), if (multi) sentence.optString("speaker", "") else "",
+                    ((audio.nameWithoutExtension.toIntOrNull() ?: 0) + 1).toString()).takeIf { it.isNotBlank() }
+            }
+        }.joinToString("\n")
+        RecordingStore.requireTranscript(timed.ifBlank { json.optString("text", "") })
     }
 
     fun chat(prompt: String): String = router.run(ApiProfiles.load(prefs, "llm"),

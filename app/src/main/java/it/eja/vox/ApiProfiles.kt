@@ -62,6 +62,7 @@ fun ApiSettingsDialog(prefs: SharedPreferences, checkUpdate: () -> Unit, dismiss
     var llm by remember { mutableStateOf(ApiProfiles.load(prefs, "llm")) }
     var freeOnly by remember { mutableStateOf(prefs.getBoolean("free_only", true)) }
     var language by remember { mutableStateOf(prefs.getString("language", "中文") ?: "中文") }
+    var multiSpeaker by remember { mutableStateOf(prefs.getBoolean("multi_speaker", false)) }
     var liveEnabled by remember { mutableStateOf(prefs.getBoolean("live_enabled", true)) }
     var receiverEnabled by remember { mutableStateOf(prefs.getBoolean("receiver_enabled", false)) }
     var autoSend by remember { mutableStateOf(prefs.getBoolean("receiver_auto_send", false)) }
@@ -104,6 +105,8 @@ fun ApiSettingsDialog(prefs: SharedPreferences, checkUpdate: () -> Unit, dismiss
                     if (page == 0) {
                         Row { Checkbox(liveEnabled, { liveEnabled = it }); Text("实时字幕") }
                         Text("默认开启，完整文字以分段转写为准。")
+                        Row { Checkbox(multiSpeaker, { multiSpeaker = it }); Text("多人模式（默认关闭）") }
+                        Text("启用时，星辰使用多人模型；编号仅在本分段内有效，不代表真实姓名。其他接口回退普通转写。新转写保留接口返回的句子时间戳，不支持时显示分段时间；旧文字不自动重转。")
                     }
                     Text("按 1→2→3 顺序尝试；仅启用的接口会接收${if (page == 0) "音频" else "文字"}。")
                     Row { Checkbox(freeOnly, { freeOnly = it }); Text("仅使用我确认仍有免费额度的接口") }
@@ -135,7 +138,7 @@ fun ApiSettingsDialog(prefs: SharedPreferences, checkUpdate: () -> Unit, dismiss
             }
             val resetSince = autoSend && (!prefs.getBoolean("receiver_auto_send", false) || prefs.getString("receiver_url", "") != receiverUrl.trim())
             ApiProfiles.save(prefs, asr + llm)
-            val edit = prefs.edit().putBoolean("free_only", freeOnly).putString("language", language).putBoolean("live_enabled", liveEnabled)
+            val edit = prefs.edit().putBoolean("free_only", freeOnly).putString("language", language).putBoolean("live_enabled", liveEnabled).putBoolean("multi_speaker", multiSpeaker)
                 .putBoolean("receiver_enabled", receiverEnabled).putBoolean("receiver_auto_send", autoSend && receiverEnabled)
                 .putString("receiver_url", receiverUrl.trim()).putString("receiver_token", receiverToken.trim())
             if (resetSince) edit.putLong("receiver_auto_since", System.currentTimeMillis())

@@ -12,15 +12,15 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /** Only finalized sentences are saved; partial revisions must not duplicate text. */
-internal class ParaformerResults(private val maxCharacters: Int = Int.MAX_VALUE) {
+internal class ParaformerResults(private val maxCharacters: Int = Int.MAX_VALUE, private val timestampOffsetMs: Long? = null) {
     private val sentences = sortedMapOf<Long, String>()
     @Synchronized fun update(begin: Long, text: String, final: Boolean) {
-        if (final) {
-            sentences[begin] = text.takeLast(maxCharacters)
+        if (final && text.isNotBlank()) {
+            sentences[begin] = (timestampOffsetMs?.let { TranscriptTiming.stamp(it + begin.coerceAtLeast(0)) + " " }.orEmpty() + text).takeLast(maxCharacters)
             while (sentences.size > 1 && sentences.values.sumOf { it.length } > maxCharacters) sentences.remove(sentences.firstKey())
         }
     }
-    @Synchronized fun text() = sentences.values.joinToString("")
+    @Synchronized fun text() = sentences.values.joinToString(if (timestampOffsetMs == null) "" else "\n")
 }
 
 class ParaformerApi(private val client: OkHttpClient) {
@@ -46,15 +46,15 @@ class ParaformerApi(private val client: OkHttpClient) {
                     Thread.sleep(100)
                 }
             }
-        })
+        }, timestampOffsetMs = TranscriptTiming.offset(audio))
     }
 
     fun stream(profile: ApiProfile, format: String,
-               sendAudio: (WebSocket, () -> Unit) -> Unit, preview: (String) -> Unit = {}): String {
+               sendAudio: (WebSocket, () -> Unit) -> Unit, preview: (String) -> Unit = {}, timestampOffsetMs: Long? = null): String {
         val started = CountDownLatch(1)
         val finished = CountDownLatch(1)
         val failure = AtomicReference<IOException?>()
-        val results = ParaformerResults(if (format == "pcm") 3000 else Int.MAX_VALUE)
+        val results = ParaformerResults(if (format == "pcm") 3000 else Int.MAX_VALUE, timestampOffsetMs)
         val id = UUID.randomUUID().toString()
         fun fail(error: IOException) { failure.compareAndSet(null, error); started.countDown(); finished.countDown() }
         fun command(action: String, payload: JSONObject) = JSONObject().put("header", JSONObject()

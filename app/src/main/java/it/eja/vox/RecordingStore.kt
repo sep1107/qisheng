@@ -17,7 +17,10 @@ object RecordingStore {
 
     fun transcript(session: File): String = segments(session).mapIndexedNotNull { index, audio ->
         val text = File(session, audio.nameWithoutExtension + ".txt")
-        if (!hasTranscript(text)) null else "[${index * 2}:00]\n${text.readText()}"
+        if (!hasTranscript(text)) null else text.readText().let { value ->
+            if (Regex("^\\[[0-9]{2,}:[0-9]{2}:[0-9]{2}]").containsMatchIn(value)) value
+            else "[${index * 2}:00]\n$value"
+        }
     }.joinToString("\n\n")
 
     fun pending(session: File) = segments(session).filter {
