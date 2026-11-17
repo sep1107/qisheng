@@ -14,8 +14,8 @@ android {
         applicationId = "io.github.sep1107.qisheng"
         minSdk = 24
         targetSdk = 36
-        versionCode = 615
-        versionName = "0.6.15"
+        versionCode = 616
+        versionName = "0.6.16"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -52,7 +52,7 @@
 
 下载直接复用 MIT 开源 [jenly1314/AppUpdater 2.2.0](https://github.com/jenly1314/AppUpdater)，不自动安装。柒声校验大小、SHA-256、包名、版本递增和与当前安装一致的签名后，才请求安卓安装器，最终由用户确认。需要时由用户授权安装来源。GitHub 无法访问时检查或下载会失败。
 
-[0.6.15 更新包](https://github.com/sep1107/qisheng/releases/tag/v0.6.15) 沿用现有安装签名，供覆盖安装试用；本版增加总结自动标题、手动备注优先和按秒时间排序命名；此前 0.6.12 已完成搜狗录音笔设置及接口实测。覆盖安装保留现有 API 配置与历史，请勿卸载旧版或清除应用数据。CI 仅验证构建，不发布使用临时调试签名的 APK。后续更新须保留首次安装的签名密钥，不能换用 CI 自动生成的另一把调试密钥。
+[0.6.16 更新包](https://github.com/sep1107/qisheng/releases/tag/v0.6.16) 沿用现有安装签名，供覆盖安装试用；本版增加总结自动标题、手动备注优先和按秒时间排序命名；此前 0.6.12 已完成搜狗录音笔设置及接口实测。覆盖安装保留现有 API 配置与历史，请勿卸载旧版或清除应用数据。CI 仅验证构建，不发布使用临时调试签名的 APK。后续更新须保留首次安装的签名密钥，不能换用 CI 自动生成的另一把调试密钥。
 
 ## 长录音边界
 
@@ -75,7 +75,7 @@
 ./gradlew testDebugUnitTest assembleDebug lintDebug
 ```
 
-本地构建 APK：`app/build/outputs/apk/debug/app-debug.apk`。正式更新资产命名为 `qisheng-0.6.15.apk`，须使用与现有安装相同的签名；公开源码仓库为 [sep1107/qisheng](https://github.com/sep1107/qisheng)。
+本地构建 APK：`app/build/outputs/apk/debug/app-debug.apk`。正式更新资产命名为 `qisheng-0.6.16.apk`，须使用与现有安装相同的签名；公开源码仓库为 [sep1107/qisheng](https://github.com/sep1107/qisheng)。
 单元测试覆盖中断 WAV 修复、分段顺序、补传判定、单段大小和长总结输入不丢失。真机验证记录见仓库 `VALIDATION.md`。
 
 ---
@@ -225,3 +225,7 @@ To build the project locally:
 包含加强后的分块和最终总结提示词，保留观点归属、限定条件、数字、分歧和明确待办，不把说法当核实事实。旧缓存总结不自动重跑，需确认重新生成才会使用新指令。
 
 接口依据：[百炼句子时间戳](https://help.aliyun.com/zh/model-studio/paraformer-real-time-speech-recognition-python-sdk)、[Groq segment 时间戳](https://console.groq.com/docs/speech-to-text)。星辰多人返回格式用合成音频实际核验。
+
+## 0.6.16：覆盖更新后返回柒声
+
+增加仅接收本应用 `MY_PACKAGE_REPLACED` 系统广播的非导出接收器。目标 Android 8.1 录音笔在覆盖安装完成后尝试打开主界面，不自动录音；与开机自启无关。Android 10及以上因后台界面启动限制不执行自动打开。厂商安装器/系统策略可能阻止拉起，失败仍可手动打开。本版未做目标设备安装验收。
