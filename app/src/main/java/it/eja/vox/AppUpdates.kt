@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import androidx.core.content.FileProvider
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -97,9 +96,16 @@ fun UpdateDialog(close: () -> Unit) {
                         context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}")))
                         message = "授权后返回这里，再点确认安装"
                     } else {
-                        val uri = FileProvider.getUriForFile(context, "${context.packageName}.updates", ready!!)
-                        context.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
-                            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                        downloading = true
+                        message = "正在准备安装…"
+                        thread {
+                            try {
+                                ApkInstaller.install(context, ready!!)
+                                handler.post { downloading = false; message = "请在系统安装器中确认安装" }
+                            } catch (_: Exception) {
+                                handler.post { downloading = false; message = "无法准备安装，请重试" }
+                            }
+                        }
                     }
                 } catch (_: Exception) { message = "无法打开安装器，请检查安装权限" }
             }) { Text("确认安装") }

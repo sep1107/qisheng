@@ -51,6 +51,7 @@ class RecordingService : Service() {
         }
     }
     private var uploadFailed = false
+    private var uploadError = ""
     private var live: LiveTranscriber? = null
 
     override fun onBind(intent: Intent?) = null
@@ -134,7 +135,7 @@ class RecordingService : Service() {
                         message = when {
                             summaryFailed -> "转写已保存，总结失败，可在 AI 操作中重试"
                             captureError -> "录音曾中断，保留原音频；请检查历史记录"
-                            pending > 0 -> "已保存，$pending 段待转写；联网并检查配置后点补传"
+                            pending > 0 -> "已保存，$pending 段待转写。" + uploadError.ifBlank { "联网并检查配置后点补传" }
                             RecordingStore.segments(folder).isEmpty() -> "未收到有效音频，请检查麦克风"
                             else -> "已保存，全部分段转写完成"
                         }) }
@@ -201,9 +202,11 @@ class RecordingService : Service() {
                 })
                 RecordingState.update { it.copy(text = RecordingStore.transcript(folder), completedSegments = RecordingStore.segments(folder).size - RecordingStore.pending(folder).size, phase = "本段转写已保存", uploadPercent = -1) }
             } catch (e: Exception) {
-                uploadFailed = true
+                uploadFailed = e !is EmptyTranscription
+                uploadError = "第 ${segments.indexOf(audio) + 1} 段：" +
+                    (if (e is ApiUnavailable) e.message.orEmpty() else "转写中断，请联网后补传")
                 // Keep audio and leave the segment pending; never persist keys or response bodies.
-                RecordingState.update { it.copy(message = "部分分段待补传，录音继续保存在本机") }
+                RecordingState.update { it.copy(message = uploadError) }
             }
         }
     }

@@ -11,7 +11,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
 
-/** Explicit opt-in only: uses device-owned keys with synthetic test content. */
+/** Explicit opt-in: synthetic probes; real repair additionally requires a specific repairSession argument. */
 @RunWith(AndroidJUnit4::class)
 class RecorderDeviceTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
@@ -28,6 +28,41 @@ class RecorderDeviceTest {
 
     private fun audio(): File = File(context.cacheDir, "qisheng-synthetic-probe.wav").apply {
         instrumentation.context.assets.open("qisheng-synthetic-probe.wav").use { source -> outputStream().use { source.copyTo(it) } }
+    }
+
+    @Test fun repairExplicitPendingSession() {
+        val id = InstrumentationRegistry.getArguments().getString("repairSession") ?: return
+        require(id.matches(Regex("[0-9]+")))
+        val session = File(context.filesDir, "recordings/$id")
+        require(session.isDirectory)
+        val cloud = CloudApi(prefs) { report("repair_phase", it) }
+        for (audio in RecordingStore.pending(session)) {
+            report("repair_segment", audio.name)
+            try {
+                val text = cloud.transcribe(audio)
+                RecordingStore.atomicText(File(session, audio.nameWithoutExtension + ".txt"), text)
+                report("repair_saved", "${audio.name} chars=${text.length}")
+            } catch (error: Exception) {
+                report("repair_failed", error.javaClass.simpleName + ": " + error.message.orEmpty())
+                throw error
+            }
+        }
+        assertTrue(RecordingStore.pending(session).isEmpty())
+    }
+
+    @Test fun installVerifiedLocalUpdate() {
+        assumeTrue(InstrumentationRegistry.getArguments().getString("installUpdate") == "true")
+        val apk = File(context.cacheDir, "updates/qisheng.apk")
+        require(apk.isFile)
+        @Suppress("DEPRECATION")
+        val version = context.packageManager.getPackageArchiveInfo(apk.path, 0)!!.versionCode
+        require(version == InstrumentationRegistry.getArguments().getString("installCode")?.toInt())
+        context.packageManager.packageInstaller.mySessions.forEach {
+            context.packageManager.packageInstaller.abandonSession(it.sessionId)
+        }
+        report("installer_version", version.toString())
+        ApkInstaller.install(context, apk)
+        report("installer", "session committed; awaiting system confirmation")
     }
 
     private fun probe(kind: String) {

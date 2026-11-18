@@ -10,7 +10,7 @@ data class ApiProfile(val id: String, val name: String, val url: String, val key
 class ApiHttpError(val status: Int, val retrySeconds: Long? = null) : IOException()
 open class ApiUnavailable(message: String) : IOException(message)
 
-class EmptyTranscription : ApiUnavailable("接口未识别到文字，录音已保留，请检查收音")
+class EmptyTranscription(message: String = "接口未识别到文字，录音已保留，请检查收音") : ApiUnavailable(message)
 
 interface ApiQuota {
     fun blockedUntil(host: String): Long
@@ -24,6 +24,8 @@ class ApiRouter(private val quota: ApiQuota, private val now: () -> Long = Syste
     fun <T> run(profiles: List<ApiProfile>, freeOnly: Boolean, report: (String) -> Unit,
                 request: (ApiProfile) -> T): T {
         val day = now() / 86_400_000L
+        val failures = mutableListOf<String>()
+        var receivedEmpty = false
         for (profile in profiles) {
             if (!profile.enabled || (freeOnly && !profile.free)) continue
             if (freeOnly && profile.freeUntil.isNotBlank()) {
@@ -44,6 +46,7 @@ class ApiRouter(private val quota: ApiQuota, private val now: () -> Long = Syste
             }
             val host = uri.host.lowercase()
             if (quota.blockedUntil(host) > now()) {
+                failures.add("${profile.name} 冷却中")
                 report("${profile.name} 冷却中，尝试下一接口"); continue
             }
             if (profile.dailyLimit > 0 && quota.used(profile.id, day) >= profile.dailyLimit) {
@@ -62,17 +65,25 @@ class ApiRouter(private val quota: ApiQuota, private val now: () -> Long = Syste
                     in 500..599 -> maxOf(60L, e.retrySeconds ?: 60L)
                     else -> throw ApiUnavailable("${profile.name} 返回 HTTP ${e.status}，保留数据，请检查接口")
                 }
+                failures.add("${profile.name} HTTP ${e.status}")
                 quota.block(host, now() + seconds.coerceAtMost(31_536_000L) * 1000)
                 report("${profile.name} 返回 HTTP ${e.status}，已冷却并尝试下一接口")
             } catch (e: EmptyTranscription) {
+                receivedEmpty = true
+                failures.add("${profile.name} 未识别到文字")
                 report("${profile.name} 返回空文字，尝试下一接口；录音仍保留")
             } catch (e: ApiUnavailable) {
                 throw e
             } catch (e: IOException) {
+                failures.add("${profile.name} 网络连接失败")
                 quota.block(host, now() + 60_000)
                 report("${profile.name} 网络失败，尝试下一接口；超时可能已计费")
             }
         }
-        throw ApiUnavailable("没有可用接口：检查免费标记、每日上限或冷却状态；音频仍保存在本机")
+        val message = if (failures.isEmpty()) "没有可用接口：检查免费标记、每日上限或冷却状态；音频仍保存在本机"
+            else failures.joinToString("；") + "。音频已保留，可补传"
+        // A completed but empty recognition is specific to this audio, not a network outage.
+        if (receivedEmpty) throw EmptyTranscription(message)
+        throw ApiUnavailable(message)
     }
 }

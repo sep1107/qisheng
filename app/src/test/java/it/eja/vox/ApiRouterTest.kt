@@ -16,6 +16,25 @@ class ApiRouterTest {
     private fun profile(id: String, host: String, free: Boolean = true, cap: Int = 0) =
         ApiProfile(id, id, "https://$host/v1/audio/transcriptions", "private-key", "model", true, free, cap)
 
+    @Test fun exhaustedProvidersKeepUsefulReasonsWithoutRawNetworkMessages() {
+        try {
+            ApiRouter(Quota()).run(listOf(profile("星辰", "a.example"), profile("百炼", "b.example"), profile("Groq", "c.example")), true, {}) {
+                when (it.id) {
+                    "星辰" -> throw ApiHttpError(500)
+                    "百炼" -> throw EmptyTranscription()
+                    else -> throw IOException("private response must not be shown")
+                }
+            }
+            fail()
+        } catch (error: ApiUnavailable) {
+            assertTrue(error is EmptyTranscription) // Later audio must still be attempted.
+            assertTrue(error.message!!.contains("星辰 HTTP 500"))
+            assertTrue(error.message!!.contains("百炼 未识别到文字"))
+            assertTrue(error.message!!.contains("Groq 网络连接失败"))
+            assertFalse(error.message!!.contains("private response"))
+        }
+    }
+
     @Test fun emptyTranscriptionTriesNextProviderWithoutNetworkCooldown() {
         val quota = Quota()
         val attempts = mutableListOf<String>()
@@ -80,7 +99,8 @@ class ApiRouterTest {
         val profiles = listOf(profile("a", "a.example"), profile("b", "b.example"))
         var calls = 0
         repeat(2) {
-            try { router.run(profiles, true, {}) { calls++; throw IOException() }; fail() } catch (_: ApiUnavailable) { }
+            try { router.run(profiles, true, {}) { calls++; throw IOException() }; fail() }
+            catch (error: ApiUnavailable) { assertFalse(error is EmptyTranscription) }
         }
         assertEquals(2, calls)
     }

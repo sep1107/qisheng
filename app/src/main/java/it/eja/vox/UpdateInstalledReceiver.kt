@@ -10,9 +10,9 @@ class UpdateInstalledReceiver : BroadcastReceiver() {
         if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
         // Android 10+ restricts background activity launches; the recorder runs Android 8.1.
         if (Build.VERSION.SDK_INT >= 29) return
+        android.util.Log.i("QishengUpdate", "Received system package replacement")
         runCatching {
-            context.startActivity(Intent(context, MainActivity::class.java)
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
-        }
+            UpdateReopen.open(context)
+        }.onFailure { android.util.Log.w("QishengUpdate", "Unable to reopen after update", it) }
     }
 }

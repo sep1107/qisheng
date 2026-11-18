@@ -27,6 +27,8 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+        <receiver android:name=".InstallResultReceiver" android:exported="false" />
+        <receiver android:name=".UpdateReopenReceiver" android:exported="false" />
         <service android:name=".RecordingService" android:exported="false"
             android:foregroundServiceType="microphone|dataSync" />
 
