@@ -188,9 +188,8 @@ class MainActivity : ComponentActivity() {
             val text = transcriptText
             thread {
                 try {
-                    val hadSummary = RecordingStore.savedSummary(folder).isNotBlank()
                     val result = RecordingStore.summary(folder, refresh) { RecordingSummary.generate(cloud, text, language) }
-                    if (refresh || !hadSummary) NoteDelivery.queue(context, folder)
+                    NoteDelivery.queue(context, folder)
                     runOnUiThread { savedSummary = result; htmlResponse = wrapHtml(RecordingExport.display(transcriptText, result), false); isUploading = false
                         RecordingState.update { it.copy(message = "总结已保存，查看不会再次消耗额度") } }
                 } catch (_: Exception) {
@@ -299,11 +298,11 @@ class MainActivity : ComponentActivity() {
                 text = {
                     Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
                         ListItem(
-                            headlineContent = { Text(if (savedSummary.isBlank()) "生成总结" else "查看已保存总结（不调用 API）") },
+                            headlineContent = { Text(if (savedSummary.isBlank()) "生成总结" else if (!RecordingStore.summaryCurrent(selectedFolder)) "更新总结（转写已变化，消耗额度）" else "查看已保存总结（不调用 API）") },
                             colors = ListItemDefaults.colors(containerColor = Color.Transparent),
                             modifier = Modifier.clickable {
                                 showActionMenu = false
-                                if (savedSummary.isNotBlank()) htmlResponse = wrapHtml(savedSummary, false)
+                                if (savedSummary.isNotBlank() && RecordingStore.summaryCurrent(selectedFolder)) htmlResponse = wrapHtml(RecordingExport.display(transcriptText, savedSummary), false)
                                 else generateSummary(false)
                             }
                         )

@@ -11,6 +11,32 @@ from note_protocol import NoteConflict
 
 
 class QueueTest(unittest.TestCase):
+    def test_android_content_revisions_retry_without_conflict_or_duplicate(self):
+        import base64
+        fixture = Path(__file__).resolve().parents[1] / "app/src/test/resources/delivery-revisions.tsv"
+        notes = []
+        for line in fixture.read_text().splitlines():
+            base, destination, title, body, ident, digest = line.split("\t")
+            notes.append(dict(schema=1, id=ident, title=base64.b64decode(title).decode(),
+                              markdown=base64.b64decode(body).decode(), sha256=digest))
+        self.assertNotEqual(notes[0]["id"], notes[1]["id"])
+        for note in notes:
+            self.assertEqual("queued", self.store.save(note)["status"])
+            self.assertEqual("queued", self.store.save(note)["status"])
+        self.assertEqual(2, len(self.rows()))
+        def offline(argv, **kwargs):
+            return CompletedProcess(argv, 1) if argv[-1] == "sync" else self.success(argv)
+        with patch("delivery_queue.subprocess.run", side_effect=offline):
+            self.assertFalse(self.store.deliver(["cli"]))
+        self.store = QueueStore(self.root / "state", self.root / "backup")
+        with patch("delivery_queue.subprocess.run", side_effect=self.success) as runner:
+            self.assertTrue(self.store.deliver(["cli"]))
+            self.assertFalse(any("put" in call.args[0] for call in runner.call_args_list))
+        for note in notes:
+            self.assertEqual("duplicate", self.store.save(note)["status"])
+        self.assertEqual(2, len(self.rows()))
+        self.assertEqual({note["markdown"] for note in notes}, {row["body"] for row in self.rows()})
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

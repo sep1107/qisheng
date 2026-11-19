@@ -28,11 +28,12 @@ object NoteDelivery {
         }
     }
     private fun schedule(context: Context, session: File) {
+        val revision = NoteDeliveryStore.revision(session)
         val request = OneTimeWorkRequestBuilder<NoteDeliveryWorker>()
-            .setInputData(workDataOf("session" to session.name))
+            .setInputData(workDataOf("session" to session.name, "revision" to revision))
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS).addTag(TAG).build()
-        WorkManager.getInstance(context).enqueueUniqueWork("$TAG-${session.name}", ExistingWorkPolicy.KEEP, request)
+        WorkManager.getInstance(context).enqueueUniqueWork("$TAG-${session.name}-$revision", ExistingWorkPolicy.KEEP, request)
     }
     fun resume(context: Context) {
         val prefs = context.getSharedPreferences("vox_prefs", 0)
@@ -46,8 +47,8 @@ object NoteDelivery {
             return
         }
         SessionLibrary.sessions(File(context.filesDir, "recordings")).forEach { session ->
+            queue(context, session)
             if (NoteDeliveryStore.ready(session) && !NoteDeliveryStore.accepted(session)) schedule(context, session)
-            else if (!NoteDeliveryStore.ready(session)) queue(context, session)
         }
     }
 }
@@ -57,30 +58,32 @@ class NoteDeliveryWorker(context: Context, parameters: WorkerParameters) : Worke
         val id = inputData.getString("session") ?: return Result.failure()
         if (!Regex("[0-9]+").matches(id)) return Result.failure()
         val session = File(applicationContext.filesDir, "recordings/$id")
-        if (!session.isDirectory || !NoteDeliveryStore.ready(session)) return Result.success()
-        if (NoteDeliveryStore.accepted(session)) return Result.success()
+        val revision = inputData.getString("revision").orEmpty() // Old WorkManager jobs refer to the legacy root payload.
+        if (!session.isDirectory || revision != NoteDeliveryStore.revision(session) || !NoteDeliveryStore.ready(session, revision)) return Result.success()
+        if (NoteDeliveryStore.accepted(session, revision)) return Result.success()
+        if (NoteDeliveryStore.read(session, "markdown", revision) != RecordingExport.markdown(session)) return Result.success()
         val prefs = applicationContext.getSharedPreferences("vox_prefs", 0)
         if (!prefs.getBoolean("receiver_auto_send", false) || !prefs.getBoolean("receiver_enabled", false)) {
-            NoteDeliveryStore.status(session, "自动发送已关闭，文字仍保留。")
+            NoteDeliveryStore.status(session, "自动发送已关闭，文字仍保留。", revision)
             return Result.success()
         }
         if (RecordingService.busy) {
-            NoteDeliveryStore.status(session, "自动发送等待录音或转写结束，文字仍保留。")
+            NoteDeliveryStore.status(session, "自动发送等待录音或转写结束，文字仍保留。", revision)
             return Result.retry()
         }
         return try {
-            val destination = NoteDeliveryStore.read(session, "destination")
+            val destination = NoteDeliveryStore.read(session, "destination", revision)
             check(destination == RecordingExport.receiverUrl(prefs.getString("receiver_url", "").orEmpty())) { "接收地址已改变，未发送旧队列内容，请手动核对。" }
-            NoteDeliveryStore.status(session, "正在自动发送文字，等待接收端确认…")
+            NoteDeliveryStore.status(session, "正在自动发送文字，等待接收端确认…", revision)
             val message = NoteReceiver.send(destination, prefs.getString("receiver_token", "").orEmpty(),
-                NoteDeliveryStore.read(session, "id"), NoteDeliveryStore.read(session, "title"), NoteDeliveryStore.read(session, "markdown"))
-            NoteDeliveryStore.accept(session, message)
+                NoteDeliveryStore.read(session, "id", revision), NoteDeliveryStore.read(session, "title", revision), NoteDeliveryStore.read(session, "markdown", revision))
+            NoteDeliveryStore.accept(session, message, revision)
             Result.success()
         } catch (error: Exception) {
             val retry = NoteDeliveryStore.retryable(error)
             runCatching { NoteDeliveryStore.status(session,
                 if (retry) "自动发送未确认，将在联网后退避重试；文字仍保留。"
-                else "自动发送未完成，请检查设置后重试。${if (error is IllegalStateException || error is IllegalArgumentException) error.message.orEmpty() else ""}") }
+                else "自动发送未完成，请检查设置后重试。${if (error is IllegalStateException || error is IllegalArgumentException) error.message.orEmpty() else ""}", revision) }
             if (retry) Result.retry() else Result.failure()
         }
     }

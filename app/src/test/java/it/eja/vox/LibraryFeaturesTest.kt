@@ -6,6 +6,48 @@ import java.nio.file.Files
 import java.io.File
 
 class LibraryFeaturesTest {
+    @Test fun completedRetryInvalidatesSummaryThenNewSummaryBecomesSendable() {
+        val root = Files.createTempDirectory("summary-repaired").toFile()
+        File(root, "000000.wav").writeBytes(byteArrayOf(1))
+        File(root, "000000.txt").writeText("第一部分")
+        var calls = 0
+        RecordingStore.summary(root) { calls++; "第一部分总结" }
+        assertTrue(RecordingStore.summaryCurrent(root))
+        assertTrue(NoteDeliveryStore.eligible(root, 0))
+        File(root, "000001.wav").writeBytes(byteArrayOf(2))
+        assertTrue(RecordingStore.summaryCurrent(root)) // Known text has not changed; do not charge for the same partial summary.
+        assertEquals("第一部分总结", RecordingStore.summary(root) { error("must reuse unchanged text") })
+        assertFalse(NoteDeliveryStore.eligible(root, 0))
+        File(root, "000001.txt").writeText("补传的结论")
+        assertTrue(RecordingStore.needsSummaryAfterRetry(root, true))
+        assertFalse(RecordingStore.needsSummaryAfterRetry(root, false))
+        assertThrows(IllegalStateException::class.java) { RecordingStore.summary(root) { error("offline") } }
+        assertEquals("第一部分总结", RecordingStore.savedSummary(root))
+        assertFalse(NoteDeliveryStore.eligible(root, 0))
+        RecordingStore.summary(root) { calls++; "完整总结" }
+        assertEquals(2, calls)
+        assertTrue(RecordingStore.summaryCurrent(root))
+        assertTrue(NoteDeliveryStore.eligible(root, 0))
+        assertFalse(RecordingStore.needsSummaryAfterRetry(root, true))
+        assertEquals("完整总结", RecordingStore.summary(root) { error("cache must not call API") })
+    }
+
+    @Test fun oldSummaryUsesFileTimesAndImportAutoSummaryChoiceSurvivesRetry() {
+        val root = Files.createTempDirectory("summary-legacy").toFile()
+        File(root, "000000.wav").writeBytes(byteArrayOf(1))
+        val text = File(root, "000000.txt").apply { writeText("旧转写"); setLastModified(1000) }
+        val summary = File(root, "summary.txt").apply { writeText("旧总结"); setLastModified(2000) }
+        assertTrue(RecordingStore.summaryCurrent(root))
+        text.writeText("补传后的转写"); text.setLastModified(3000)
+        assertFalse(RecordingStore.summaryCurrent(root))
+        assertTrue(RecordingStore.needsSummaryAfterRetry(root, true))
+        val imported = Files.createTempDirectory("auto-summary-retry").toFile()
+        assertFalse(RecordingStore.needsSummaryAfterRetry(imported, false))
+        File(imported, "auto-summary.txt").writeText("1")
+        assertTrue(RecordingStore.needsSummaryAfterRetry(imported, false))
+        assertEquals("旧总结", summary.readText())
+    }
+
     @Test fun savedSummaryIsReusedUntilExplicitRegeneration() {
         val root = Files.createTempDirectory("summary-cache").toFile()
         var calls = 0

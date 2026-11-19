@@ -7,6 +7,20 @@ import java.io.IOException
 import java.nio.file.Files
 
 class NoteDeliveryStoreTest {
+    @Test fun versionIdsMatchTheSharedReceiverProtocolFixture() {
+        val session = session()
+        javaClass.getResourceAsStream("/delivery-revisions.tsv")!!.bufferedReader().useLines { lines ->
+            lines.forEach { line ->
+                val fields = line.split('\t')
+                val title = String(java.util.Base64.getDecoder().decode(fields[2]), Charsets.UTF_8)
+                val markdown = String(java.util.Base64.getDecoder().decode(fields[3]), Charsets.UTF_8)
+                assertTrue(NoteDeliveryStore.prepare(session, fields[1], fields[0], title, markdown))
+                assertEquals(fields[4], NoteDeliveryStore.read(session, "id"))
+                assertEquals(fields[5], RecordingExport.sha256(NoteDeliveryStore.read(session, "markdown")))
+            }
+        }
+    }
+
     private fun session(): File = File(Files.createTempDirectory("note-delivery").toFile(), "1234567890000").apply {
         mkdirs()
         File(this, "000000.wav").writeBytes(byteArrayOf(1, 2))
@@ -34,21 +48,59 @@ class NoteDeliveryStoreTest {
         assertFalse(NoteDeliveryStore.eligible(failed, 0))
     }
 
-    @Test fun queuedPayloadSurvivesRetryAndRejectsSilentContentOrDestinationReplacement() {
+    @Test fun contentUpdateHidesOldSuccessAndLateReceiptCannotAcceptTheNewVersion() {
+        val session = session()
+        val first = RecordingExport.markdown(session)
+        assertTrue(NoteDeliveryStore.prepare(session, "https://one.example/v1/notes", "device-session", "会议", first))
+        val old = NoteDeliveryStore.revision(session)
+        val oldId = NoteDeliveryStore.read(session, "id", old)
+        NoteDeliveryStore.accept(session, "发送成功", old)
+        assertEquals("发送成功", NoteDeliveryStore.status(session))
+        File(session, "000001.wav").writeBytes(byteArrayOf(3, 4))
+        File(session, "000001.txt").writeText("补齐的重要结论。")
+        assertFalse(NoteDeliveryStore.status(session).contains("发送成功"))
+        RecordingStore.summary(session, true) { "包含补齐内容的新总结" }
+        val next = RecordingExport.markdown(session)
+        assertTrue(NoteDeliveryStore.prepare(session, "https://one.example/v1/notes", "device-session", "会议", next))
+        val current = NoteDeliveryStore.revision(session)
+        assertNotEquals(old, current)
+        assertNotEquals(oldId, NoteDeliveryStore.read(session, "id"))
+        assertEquals(first, NoteDeliveryStore.read(session, "markdown", old))
+        NoteDeliveryStore.accept(session, "发送成功", old) // A delayed response for the older request.
+        assertFalse(NoteDeliveryStore.accepted(session))
+        assertFalse(NoteDeliveryStore.status(session).contains("发送成功"))
+        assertTrue(NoteDeliveryStore.prepare(session, "https://one.example/v1/notes", "device-session", "会议", next))
+        assertEquals(current, NoteDeliveryStore.revision(session)) // Offline retries use the same ID and payload.
+        NoteDeliveryStore.accept(session, "发送成功", current)
+        assertEquals("发送成功", NoteDeliveryStore.status(session))
+        assertFalse(NoteDeliveryStore.prepare(session, "https://one.example/v1/notes", "device-session", "会议", next))
+    }
+
+    @Test fun legacySuccessIsReadableButCannotHideNewTranscription() {
+        val session = session()
+        val legacy = File(session, "delivery").apply { mkdirs() }
+        mapOf("id" to "legacy-id", "destination" to "https://one.example/v1/notes", "markdown" to RecordingExport.markdown(session),
+            "title" to "会议", "ready" to "1", "accepted" to "1", "status" to "发送成功").forEach { (key, value) ->
+            File(legacy, if (key in listOf("ready", "accepted")) key else "$key.txt").writeText(value)
+        }
+        assertEquals("", NoteDeliveryStore.revision(session))
+        assertEquals("发送成功", NoteDeliveryStore.status(session))
+        File(session, "000000.txt").writeText("更新的转写内容")
+        assertFalse(NoteDeliveryStore.status(session).contains("发送成功"))
+        RecordingStore.summary(session, true) { "更新总结" }
+        assertTrue(NoteDeliveryStore.prepare(session, "https://one.example/v1/notes", "device-session", "会议", RecordingExport.markdown(session)))
+        assertFalse(NoteDeliveryStore.accepted(session))
+        assertEquals("1", File(legacy, "accepted").readText())
+    }
+
+    @Test fun automaticDestinationChangeIsBlockedButExplicitManualSendCanChangeIt() {
         val session = session()
         val body = RecordingExport.markdown(session)
-        assertTrue(NoteDeliveryStore.prepare(session, "https://one.example/v1/notes", "device-session", "会议", body))
-        assertTrue(NoteDeliveryStore.ready(session))
-        assertTrue(NoteDeliveryStore.prepare(session, "https://one.example/v1/notes", "device-session", "会议", body))
+        NoteDeliveryStore.prepare(session, "https://one.example/v1/notes", "device-session", "会议", body)
         assertFalse(NoteDeliveryStore.prepare(session, "https://two.example/v1/notes", "device-session", "会议", body))
         assertEquals("https://one.example/v1/notes", NoteDeliveryStore.read(session, "destination"))
-        File(session, "summary.txt").writeText("后来重新生成的总结")
-        assertFalse(NoteDeliveryStore.prepare(session, "https://one.example/v1/notes", "device-session", "会议", RecordingExport.markdown(session)))
-        assertEquals(body, NoteDeliveryStore.read(session, "markdown"))
-        NoteDeliveryStore.accept(session, "发送成功")
-        assertTrue(NoteDeliveryStore.accepted(session))
-        assertTrue(NoteDeliveryStore.status(session).contains("此前排队版本"))
-        assertFalse(NoteDeliveryStore.prepare(session, "https://one.example/v1/notes", "device-session", "会议", body))
+        assertTrue(NoteDeliveryStore.prepare(session, "https://two.example/v1/notes", "device-session", "会议", body, true))
+        assertEquals("https://two.example/v1/notes", NoteDeliveryStore.read(session, "destination"))
     }
 
     @Test fun movingRecordingToTrashAlsoMovesItsPendingPayloadAndRemovesItFromActiveSessions() {

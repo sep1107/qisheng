@@ -36,8 +36,20 @@ object RecordingStore {
 
     fun savedSummary(session: File): String = File(session, "summary.txt").takeIf { it.isFile }?.readText().orEmpty()
 
+    fun needsSummaryAfterRetry(session: File, autoSend: Boolean) =
+        (File(session, "auto-summary.txt").isFile || (autoSend && savedSummary(session).isNotBlank())) && !summaryCurrent(session)
+
+    fun summaryCurrent(session: File): Boolean {
+        val summary = File(session, "summary.txt")
+        if (!summary.isFile || summary.readText().isBlank()) return false
+        val source = File(session, "summary-source.sha256")
+        return if (source.isFile) source.readText() == RecordingExport.sha256(transcript(session))
+        else segments(session).all { File(session, it.nameWithoutExtension + ".txt").lastModified() <= summary.lastModified() }
+    }
+
     fun summary(session: File, refresh: Boolean = false, generate: () -> String): String {
-        if (!refresh) savedSummary(session).takeIf { it.isNotBlank() }?.let { return it }
+        if (!refresh && summaryCurrent(session)) return savedSummary(session)
+        val sourceHash = RecordingExport.sha256(transcript(session))
         val generated = requireTranscript(generate())
         val first = generated.lineSequence().first().trim()
         val title = first.takeIf { it.startsWith("# ") }?.removePrefix("# ")?.trim()?.take(100).orEmpty()
@@ -45,6 +57,7 @@ object RecordingStore {
         val result = body.ifBlank { generated }
         if (title.isNotBlank() && body.isNotBlank()) atomicText(File(session, "auto-title.txt"), title)
         atomicText(File(session, "summary.txt"), result)
+        atomicText(File(session, "summary-source.sha256"), sourceHash)
         return result
     }
 

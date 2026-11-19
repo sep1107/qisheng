@@ -98,6 +98,7 @@ class RecordingService : Service() {
             try {
                 RecordingStore.recover(folder)
                 if (importing) {
+                    if (intent?.getBooleanExtra("autoSummary", false) == true) RecordingStore.atomicText(File(folder, "auto-summary.txt"), "1")
                     RecordingStore.atomicText(File(folder, "import-incomplete.txt"), "导入尚未完成，请勿总结；失败后请重新导入原文件")
                     AudioImporter.import(this, intent!!.data!!, folder) { seconds ->
                         RecordingState.update { it.copy(seconds = seconds, message = "正在导入并分段：${seconds / 60} 分钟") }
@@ -121,7 +122,8 @@ class RecordingService : Service() {
                     var summary = RecordingStore.savedSummary(folder)
                     var summaryFailed = false
                     var summaryCreated = false
-                    if (importing && intent?.getBooleanExtra("autoSummary", false) == true && pending == 0 && !captureError) {
+                    val updateSummary = retry && RecordingStore.needsSummaryAfterRetry(folder, getSharedPreferences("vox_prefs", MODE_PRIVATE).getBoolean("receiver_auto_send", false))
+                    if (((importing && intent?.getBooleanExtra("autoSummary", false) == true) || updateSummary) && pending == 0 && !captureError) {
                         RecordingState.update { it.copy(message = "转写完成，正在生成总结", phase = "生成总结", uploadPercent = -1) }
                         try {
                             summary = RecordingStore.summary(folder) { RecordingSummary.generate(cloud, RecordingStore.transcript(folder), getSharedPreferences("vox_prefs", MODE_PRIVATE).getString("language", "中文") ?: "中文") }

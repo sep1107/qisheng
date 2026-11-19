@@ -87,6 +87,8 @@ fun ExportDialog(session: File, close: () -> Unit) {
     }, text = {
         Column(Modifier.verticalScroll(rememberScrollState())) {
             Text("可直接发送已有原文和总结，无需先保存文件，不重新调用 AI。系统录音导入后的记录也支持。")
+            if (RecordingStore.savedSummary(session).isNotBlank() && !RecordingStore.summaryCurrent(session))
+                Text("转写已变化，总结尚未更新。建议先更新总结，再发送新版。")
             Row { Checkbox(audio, { audio = it }, enabled = !busy); Text("同时导出音频 ZIP（可选，默认不选）") }
             Text("勾选后输出两个独立文件：Markdown 笔记、仅含 WAV 分段的 ZIP。系统原录音保持不变。")
             Row {
@@ -96,7 +98,7 @@ fun ExportDialog(session: File, close: () -> Unit) {
             Text(if (enabled) "接收地址：$url" else "请先在设置中启用并配置自己的接收端。")
             Text(if (prefs.getBoolean("receiver_auto_send", false)) "总结完成后自动发送已开启，可在设置中关闭。" else "自动发送未开启，可在设置中选择总结完成后自动发送。")
             TextButton({ confirmSend = true }, enabled = enabled && !busy) { Text("发送文字到 Obsidian 接收端") }
-            Text("接收端须兼容柒声协议；这里的发送只含原文与总结，不含音频。")
+            Text("发送只含原文与总结。同一版本重试不重复入库；更新内容按新版本发送，接收端保留旧版笔记。")
         }
     }, confirmButton = { TextButton(close, enabled = !busy) { Text("关闭") } })
     if (confirmSend) AlertDialog(onDismissRequest = { confirmSend = false }, title = { Text("发送到你配置的接收端？") },
@@ -108,13 +110,15 @@ fun ExportDialog(session: File, close: () -> Unit) {
                 val device = NoteDelivery.deviceId(prefs)
                 val id = "$device-${session.name}"
                 val markdown = RecordingExport.markdown(session)
-                val result = NoteReceiver.send(destination, credential, id, SessionLibrary.noteTitle(session), markdown)
-                runCatching {
-                    if (NoteDeliveryStore.ready(session) && NoteDeliveryStore.read(session, "id") == id &&
-                        NoteDeliveryStore.read(session, "destination") == RecordingExport.receiverUrl(destination) &&
-                        NoteDeliveryStore.read(session, "markdown") == markdown) NoteDeliveryStore.accept(session, result)
+                NoteDeliveryStore.prepare(session, RecordingExport.receiverUrl(destination), id,
+                    SessionLibrary.noteTitle(session), markdown, allowDestinationChange = true)
+                val revision = NoteDeliveryStore.revision(session)
+                if (!NoteDeliveryStore.accepted(session, revision)) {
+                    val result = NoteReceiver.send(destination, credential, NoteDeliveryStore.read(session, "id", revision),
+                        NoteDeliveryStore.read(session, "title", revision), NoteDeliveryStore.read(session, "markdown", revision))
+                    NoteDeliveryStore.accept(session, result, revision)
                 }
-                result
+                NoteDeliveryStore.status(session)
             } }
         }) { Text("发送") } }, dismissButton = { TextButton({ confirmSend = false }) { Text("取消") } })
 }
