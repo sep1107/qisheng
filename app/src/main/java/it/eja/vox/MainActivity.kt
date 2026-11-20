@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -248,7 +249,6 @@ class MainActivity : ComponentActivity() {
                 }
                 Text("${recording.seconds / 60}:${(recording.seconds % 60).toString().padStart(2, '0')} · ${recording.message}",
                     modifier = Modifier.padding(horizontal = 12.dp))
-                if (deliveryMessage.isNotBlank()) Text(deliveryMessage, Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.bodyMedium)
                 if (hasPending && !recording.processing && !isUploading) {
                     if (hasPending) Text("还有录音分段未转写，补传完成后才能总结。", Modifier.padding(horizontal = 12.dp))
                     if (incompleteImport) Text("导入未完成，请重新导入原文件；当前部分不可总结。")
@@ -258,8 +258,19 @@ class MainActivity : ComponentActivity() {
                     }) { Icon(Icons.Default.Refresh, null); Text("补传未完成分段") }
                 }
 
-                if (selectedSession.isNotEmpty() && !recording.processing && !isUploading) {
-                    TextButton({ showExport = true }) { Text("保存笔记") }
+                val canSaveNote = selectedSession.isNotEmpty() && !recording.processing && !isUploading
+                if (deliveryMessage.isNotBlank() || canSaveNote) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (deliveryMessage.isNotBlank()) {
+                            Text(deliveryMessage, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        } else {
+                            Spacer(Modifier.weight(1f))
+                        }
+                        if (canSaveNote) TextButton({ showExport = true }) { Text("保存笔记") }
+                    }
                 }
                 if (recordingState && recording.liveText.isNotBlank()) {
                     val liveScroll = rememberScrollState()
