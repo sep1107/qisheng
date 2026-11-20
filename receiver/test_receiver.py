@@ -38,6 +38,13 @@ class ReceiverTest(unittest.TestCase):
         client.close()
         return result
 
+    def test_compact_name_in_direct_receiver_preserves_existing_suffix(self):
+        note = dict(self.note, title="2026-11-18_111530 门店会议")
+        self.assertEqual(201, self.request(note)[0])
+        path = next(self.store.inbox.glob("*.md"))
+        self.assertEqual("20261118_111530 门店会议 [device-session-001].md", path.name)
+        self.assertEqual(note["markdown"], path.read_text())
+
     def test_save_duplicate_and_changed_note_without_overwrite(self):
         self.assertEqual(201, self.request()[0])
         code, ack = self.request()

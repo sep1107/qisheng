@@ -53,6 +53,26 @@ class QueueTest(unittest.TestCase):
     def success(self, argv, **kwargs):
         return CompletedProcess(argv, 0, stdout="\n".join(row["path"] + "\t1\t0\trev" for row in self.rows()))
 
+    def test_compact_recording_names_preserve_body_and_id_and_skip_rednote(self):
+        note = dict(self.note, title="2026-11-18_111530 门店会议")
+        self.store.save(note)
+        row = self.rows()[0]
+        self.assertEqual("00.收集箱Inbox/07.柒声Qisheng/20261118_111530 门店会议 [qisheng-session-001].md", row["path"])
+        self.assertEqual(note["markdown"], row["body"])
+        with patch("delivery_queue.subprocess.run", side_effect=self.success):
+            self.assertTrue(self.store.deliver(["cli"]))
+        self.assertEqual("duplicate", self.store.save(note)["status"])
+        self.assertEqual(1, len(self.rows()))
+        self.store.enqueue("rednote", note)
+        self.assertIn("2026-11-18_111530 门店会议", next(r for r in self.rows() if r["source"] == "rednote")["path"])
+
+    def test_existing_delivery_keeps_its_original_path_when_naming_rule_changes(self):
+        self.store.save(self.note)
+        with self.store.connect() as db:
+            db.execute("UPDATE deliveries SET path=?,status='synced'", ("original-historical-path.md",))
+        self.assertEqual("duplicate", self.store.save(dict(self.note, title="2026-11-18_111530 新标题"))["status"])
+        self.assertEqual("original-historical-path.md", self.rows()[0]["path"])
+
     def test_source_namespaces_conflict_and_separate_ledgers(self):
         self.assertEqual("queued", self.store.save(self.note)["status"])
         self.store.enqueue("rednote", self.note)

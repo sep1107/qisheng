@@ -7,7 +7,7 @@ import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from note_protocol import MAX_BODY, NoteConflict, validate_note
+from note_protocol import MAX_BODY, NoteConflict, qisheng_title, validate_note
 
 
 class Store:
@@ -23,6 +23,7 @@ class Store:
 
     def save(self, data):
         ident, title, text, digest = validate_note(data)
+        title = qisheng_title(title, text)
         body = text.encode("utf-8")
         with sqlite3.connect(self.database, timeout=10) as db:
             db.execute("BEGIN IMMEDIATE")

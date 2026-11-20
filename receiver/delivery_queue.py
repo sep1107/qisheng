@@ -10,7 +10,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from note_protocol import NoteConflict, validate_note
+from note_protocol import NoteConflict, validate_note, qisheng_title
 
 FOLDERS = {"qisheng": "00.收集箱Inbox/07.柒声Qisheng", "rednote": "00.收集箱Inbox/01.小红书Rednote"}
 
@@ -99,6 +99,8 @@ class QueueStore:
         if source not in FOLDERS:
             raise ValueError("Unknown source")
         ident, title, text, digest = validate_note(data)
+        if source == "qisheng":
+            title = qisheng_title(title, text)
         path = f"{FOLDERS[source]}/{title} [{source}-{ident}].md"
         with self.lock():
             with self.connect() as db:

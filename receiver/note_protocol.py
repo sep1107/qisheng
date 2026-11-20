@@ -1,4 +1,5 @@
 """Shared validation for direct and queued Markdown receivers."""
+import datetime
 import hashlib
 import hmac
 import re
@@ -23,3 +24,27 @@ def validate_note(data):
         raise ValueError("invalid hash or size")
     title = re.sub(r'[\\/:*?"<>|\x00-\x1f\x7f]', "_", title).strip(" .")[:60] or "柒声录音"
     return ident, title, text, digest
+
+
+def qisheng_title(title, markdown):
+    """Compact an existing recording timestamp; legacy exports can use their session header."""
+    match = re.match(r"^(\d{4})-(\d{2})-(\d{2})_(\d{6})\s+(.+)$", title)
+    if match:
+        stamp = "".join(match.group(i) for i in (1, 2, 3)) + "_" + match.group(4)
+        caption = match.group(5)
+    else:
+        match = re.match(r"^(\d{8}_\d{6})[ _]+(.+)$", title)
+        if match:
+            stamp, caption = match.groups()
+        else:
+            header = markdown.split("## ", 1)[0][:1000]
+            match = re.search(r"^会话时间[^\n：:]*[：:]\s*(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})", header, re.M)
+            if not match:
+                return title
+            stamp = match.group(1).replace("-", "") + "_" + match.group(2).replace(":", "")
+            caption = title
+    try:
+        datetime.datetime.strptime(stamp, "%Y%m%d_%H%M%S")
+    except ValueError:
+        return title
+    return (stamp + " " + caption.strip())[:60]
