@@ -16,3 +16,9 @@ class NoteNameTest(unittest.TestCase):
     def test_missing_or_invalid_dates_are_not_invented(self):
         self.assertEqual("会议", qisheng_title("会议", "没有会话时间"))
         self.assertEqual("2026-99-18_111530 会议", qisheng_title("2026-99-18_111530 会议", ""))
+
+    def test_generic_recording_prefix_is_removed_from_caption_only(self):
+        self.assertEqual("20261118_111530 工作纪律", qisheng_title("20261118_111530 录音整理：工作纪律", ""))
+        self.assertEqual("20261118_111530 工作纪律", qisheng_title("2026-11-18_111530 录音整理_工作纪律", ""))
+        self.assertEqual("20261118_111530 讨论录音整理工具", qisheng_title("20261118_111530 讨论录音整理工具", ""))
+        self.assertEqual("20261118_111530 录音整理", qisheng_title("20261118_111530 录音整理", ""))

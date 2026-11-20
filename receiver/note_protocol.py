@@ -47,4 +47,5 @@ def qisheng_title(title, markdown):
         datetime.datetime.strptime(stamp, "%Y%m%d_%H%M%S")
     except ValueError:
         return title
-    return (stamp + " " + caption.strip())[:60]
+    caption = re.sub(r"^录音整理[：:_\s]*", "", caption).strip() or caption.strip()
+    return (stamp + " " + caption)[:60]
