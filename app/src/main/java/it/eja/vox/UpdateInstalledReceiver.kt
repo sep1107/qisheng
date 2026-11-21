@@ -12,7 +12,7 @@ class UpdateInstalledReceiver : BroadcastReceiver() {
         if (Build.VERSION.SDK_INT >= 29) return
         android.util.Log.i("QishengUpdate", "Received system package replacement")
         runCatching {
-            UpdateReopen.open(context)
+            UpdateReopen.afterInstall(context)
         }.onFailure { android.util.Log.w("QishengUpdate", "Unable to reopen after update", it) }
     }
 }

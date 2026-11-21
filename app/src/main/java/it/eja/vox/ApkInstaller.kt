@@ -57,7 +57,7 @@ class InstallResultReceiver : BroadcastReceiver() {
             }
             PackageInstaller.STATUS_SUCCESS -> {
                 // This recorder is Android 8.1. Newer Android limits background launches.
-                if (Build.VERSION.SDK_INT < 29) UpdateReopen.open(context)
+                if (Build.VERSION.SDK_INT < 29) UpdateReopen.afterInstall(context)
             }
             else -> {
                 UpdateReopen.cancel(context)

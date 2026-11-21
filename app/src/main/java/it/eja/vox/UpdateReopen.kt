@@ -28,6 +28,14 @@ internal object UpdateReopen {
         schedule(context)
     }
 
+    fun afterInstall(context: Context) {
+        check(prefs(context).edit().putInt("version", BuildConfig.VERSION_CODE)
+            .putLong("expires", SystemClock.elapsedRealtime() + 600_000).commit())
+        // Let the system installer finish returning to the launcher before opening.
+        context.getSystemService(AlarmManager::class.java).setExactAndAllowWhileIdle(
+            AlarmManager.ELAPSED_REALTIME_WAKEUP, SystemClock.elapsedRealtime() + 5_000, callback(context))
+    }
+
     fun cancel(context: Context) {
         prefs(context).edit().clear().commit()
         val alarms = context.getSystemService(AlarmManager::class.java)

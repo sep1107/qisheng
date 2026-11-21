@@ -2,7 +2,7 @@
 
 适合安卓录音笔的长录音、在线转写与 AI 总结应用。支持 Android 7.0 及以上，已在刷入 Android 8.1 的搜狗 S1 录音笔上进行过长录音与转写测试。
 
-**当前版本：0.7.3** · [下载 APK](https://github.com/sep1107/qisheng/releases/latest) · [验证记录](VALIDATION.md)
+**当前版本：0.7.5** · [下载 APK](https://github.com/sep1107/qisheng/releases/latest) · [验证记录](VALIDATION.md)
 
 基于 [eja/vox](https://github.com/eja/vox) 开发，保留原作者版权与 [GPL-3.0 许可证](LICENSE)。本仓库独立维护柒声品牌及新增功能。
 
@@ -22,7 +22,7 @@
 
 ## 安装与更新
 
-从 [最新 Release](https://github.com/sep1107/qisheng/releases/latest) 下载 `qisheng-0.7.3.apk`。应用包名为 `io.github.sep1107.qisheng`。
+从 [最新 Release](https://github.com/sep1107/qisheng/releases/latest) 下载 `qisheng-0.7.5.apk`。应用包名为 `io.github.sep1107.qisheng`。
 
 已有柒声请直接覆盖安装，**不要卸载旧版或清除数据**，这样保留现有 API、发送配置和历史。新版沿用现有签名及配置键。应用内更新使用系统安装会话及完成回调。Android 9及以下先约30秒检查一次，再由系统每分钟补偿检查、只在10分钟内尝试，只在目标版本已安装后打开；取消安装即撤销，避免厂商更新强停吞掉即时回调。外部安装器直接安装仍受其行为影响。Android 10及以上保持手动打开。
 
@@ -80,6 +80,6 @@
 ./gradlew testDebugUnitTest assembleDebug lintDebug
 ```
 
-本地 APK：`app/build/outputs/apk/debug/app-debug.apk`。当前正式版本0.7.3，对应versionCode703，发布标签 `v0.7.3`，资产 `qisheng-0.7.3.apk`；沿用已验证的包名、签名和API配置键。0.7.3已通过本地回归与接收端兼容测试，尚未连接录音笔做本版真机验收。后续覆盖更新需保持原签名；CI构建不应使用另一把临时签名发布。
+本地 APK：`app/build/outputs/apk/debug/app-debug.apk`。当前正式版本0.7.5，对应versionCode705，发布标签 `v0.7.5`，资产 `qisheng-0.7.5.apk`；沿用已验证的包名、签名和API配置键。0.7.5 已通过构建和单元测试，在线安装后自动打开待真机验证。后续覆盖更新需保持原签名；CI构建不应使用另一把临时签名发布。
 
 详细验证范围及尚未实测项见 [VALIDATION.md](VALIDATION.md)。本仓库保留上游提交历史和版权，遵循 GPL-3.0。
